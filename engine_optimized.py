@@ -67,10 +67,18 @@ def standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             col_map[col] = 'Tarih'
     df_clean.rename(columns=col_map, inplace=True)
     if 'Tarih' in df_clean.columns:
-        # Tarih zaten DD.MM.YYYY formatındaysa parse etme!
-        sample = df_clean['Tarih'].astype(str).iloc[0] if len(df_clean) > 0 else ""
-        if not re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
-            # Sadece farklı formattaysa parse et
+        # Tarih formatını kontrol et
+        sample = str(df_clean['Tarih'].iloc[0]) if len(df_clean) > 0 else ""
+        
+        # Unix timestamp (milisaniye) kontrolü
+        if sample.isdigit() and len(sample) > 10:
+            # Milisaniye → datetime
+            dt = pd.to_datetime(df_clean['Tarih'].astype(int), unit='ms', errors='coerce')
+            mask = dt.notna()
+            df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
+        # DD.MM.YYYY formatındaysa parse etme
+        elif not re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
+            # Farklı formattaysa parse et
             try:
                 dt = pd.to_datetime(df_clean['Tarih'], format='%d.%m.%Y', errors='coerce')
             except:
