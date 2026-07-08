@@ -274,20 +274,25 @@ with st.sidebar:
             try:
                 fb = uploaded_file.read()
                 df_new = pd.read_excel(BytesIO(fb)) if uploaded_file.name.endswith(('.xlsx', '.xls')) else pd.read_csv(BytesIO(fb))
-                st.session_state.raw_df = df_new
-                st.session_state._last_uploaded_file = uploaded_name  # Dosya adını kaydet
-                cid = st.session_state.current_company_id
-                if db.online:
-                    # Tarihleri DD.MM.YYYY formatına çevir (DB'ye kaydetmeden önce)
-                    df_for_json = df_new.copy()
-                    if 'Tarih' in df_for_json.columns:
-                        try:
-                            dt = pd.to_datetime(df_for_json['Tarih'], format='%d.%m.%Y', errors='coerce')
-                            mask = dt.notna()
-                            df_for_json.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
-                        except:
-                            pass
-                    db.save_raw_data(df_for_json.to_dict(orient="records"), cid, current_user.get("username", "system"))
+            st.session_state.raw_df = df_new
+            st.session_state._last_uploaded_file = uploaded_name
+            cid = st.session_state.current_company_id
+            if db.online:
+                # Tarihleri DD.MM.YYYY formatına çevir (Unix timestamp dahil)
+                df_for_json = df_new.copy()
+                if 'Tarih' in df_for_json.columns:
+                    sample = str(df_for_json['Tarih'].iloc[0]) if len(df_for_json) > 0 else ""
+                    
+                    # Unix timestamp (milisaniye) kontrolü
+                    if sample.isdigit() and len(sample) > 10:
+                        dt = pd.to_datetime(df_for_json['Tarih'].astype(int), unit='ms', errors='coerce')
+                    else:
+                        dt = pd.to_datetime(df_for_json['Tarih'], format='%d.%m.%Y', errors='coerce')
+                    
+                    mask = dt.notna()
+                    df_for_json.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
+                
+                db.save_raw_data(df_for_json.to_dict(orient="records"), cid, current_user.get("username", "system"))
                 mapped_df, stats = apply_rules(df_new, st.session_state.rules, st.session_state.bank_accounts)
                 st.session_state.mapped_df = mapped_df
                 st.session_state.stats = stats
