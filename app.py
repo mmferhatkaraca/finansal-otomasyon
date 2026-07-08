@@ -874,7 +874,7 @@ elif menu == "🧾 Zirve Aktarım":
                                 rows.append({"Hesap Kodu": str(row.get("Muhasebe Hesap Kodu","")), "Evrak Tarihi": str(row.get("Tarih","")), "Evrak No": fno, "B.T.": 8, "Vergi/TC No": "", "Açıklama": str(row.get("Açıklama","")), "Para Birimi": "", "Döviz Tutarı": "", "Borçlu": float(row.get("Alacak",0)), "Alacaklı": float(row.get("Borç",0)), "Belge Türü Açıklaması (B.Türü 8 İse)": "Banka Aktarım", "Ödeme Şekli": ""})
                             if rows:
                                 eb = BytesIO(); pd.DataFrame(rows).to_excel(eb, index=False)
-                                zf.writestr(f"{ay:02d}_{ay_ad.get(ay,''}_Aktarim.xlsx", eb.getvalue())
+                                zf.writestr(f"{ay:02d}_{ay_ad.get(ay,'')}_Aktarim.xlsx", eb.getvalue())
                     buf.seek(0)
                     st.success(f"✅ {len(aylar_to_export)} ay oluşturuldu!")
                     st.download_button("📥 ZIP İndir", data=buf.getvalue(), file_name=f"Zirve_{datetime.now().strftime('%Y%m%d')}.zip", mime="application/zip", type="primary", width="stretch")
