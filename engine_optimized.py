@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Finansal Otomasyon v7.0 - YÜKSEK PERFORMANSLI KURAL MOTORU
-- Vectorized operations (pandas/numpy)
-- JIT-like compiled criteria matching
-- Minimal Python loops
+Finansal Otomasyon v6.0 - Yüksek Performanslı Kural Motoru
 """
 
 import time
 import re
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
 from models import Rule, BankAccountDefinition, ExecutionStats
@@ -26,348 +23,263 @@ def validate_columns(df: pd.DataFrame) -> List[str]:
 
 
 def _clean_amount(val: Any) -> float:
-    """Hızlı tutar temizleme - C implementation kullanımı"""
     if pd.isna(val) or val == "" or val is None:
         return 0.0
     if isinstance(val, (int, float)):
         return float(val)
-    
     val_str = str(val).strip()
-    # Hızlı string işlemleri
-    has_comma = ',' in val_str
-    has_dot = '.' in val_str
-    
-    if has_comma and has_dot:
+    if ',' in val_str and '.' in val_str:
         if val_str.rfind(',') > val_str.rfind('.'):
             val_str = val_str.replace('.', '').replace(',', '.')
         else:
             val_str = val_str.replace(',', '')
-    elif has_comma:
+    elif ',' in val_str:
         val_str = val_str.replace(',', '.')
-    
-    # Sadece rakam ve işaret tut
-    cleaned = ''.join(c for c in val_str if c.isdigit() or c in '.-')
-    
+    cleaned = re.sub(r'[^\d.-]', '', val_str)
     try:
         return float(cleaned) if cleaned else 0.0
     except ValueError:
         return 0.0
 
 
-def _clean_amount_vectorized(series: pd.Series) -> pd.Series:
-    """Vectorized tutar temizleme - çok hızlı"""
-    # NaN ve None kontrolü
-    series = series.fillna('').astype(str)
-    
-    # Virgül ve nokta işlemleri
-    mask_both = series.str.contains(',') & series.str.contains('\.')
-    # Koşullu işlemler için numpy kullan
-    result = pd.to_numeric(series.str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0.0)
-    
-    return result
-
-
 def standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """DataFrame'i standart formata çevir - OPTİMİZE"""
-    if df is None or df.empty:
-        return pd.DataFrame()
-    
     df_clean = df.copy()
     col_map = {}
-    
-    # Kolon mapping - dict comprehension ile hızlı
-    col_rename_map = {
-        'tutar': 'Tutar', 'işlem tutarı': 'Tutar', 'giriş tutarı': 'Tutar', 'çıkış tutarı': 'Tutar',
-        'açıklama': 'Açıklama', 'aciklama': 'Açıklama', 'işlem açıklaması': 'Açıklama',
-        'banka adı': 'Banka Adı', 'banka adi': 'Banka Adı', 'banka': 'Banka Adı',
-        'cari tanım (alıcı)': 'Cari Tanım', 'cari tanım': 'Cari Tanım', 'cari adı': 'Cari Tanım', 'alıcı': 'Cari Tanım',
-        'fiş türü': 'Fiş Türü', 'fiş turu': 'Fiş Türü', 'işlem türü': 'Fiş Türü',
-        'hareket tipi': 'Hareket Tipi', 'hareket yönü': 'Hareket Tipi', 'borç/alacak': 'Hareket Tipi', 'yön': 'Hareket Tipi',
-        'proje': 'Proje', 'projesi': 'Proje', 'proje adı': 'Proje',
-        'b/k/v': 'B/K/V', 'bkv': 'B/K/V',
-        'tarih': 'Tarih', 'i̇şlem tarihi': 'Tarih', 'işlem tarihi': 'Tarih', 'valör': 'Tarih', 'tarihi': 'Tarih'
-    }
-    
     for col in df_clean.columns:
         cl = str(col).strip().lower()
-        if cl in col_rename_map:
-            col_map[col] = col_rename_map[cl]
-    
+        if cl in ['tutar', 'işlem tutarı', 'giriş tutarı', 'çıkış tutarı']:
+            col_map[col] = 'Tutar'
+        elif cl in ['açıklama', 'aciklama', 'işlem açıklaması']:
+            col_map[col] = 'Açıklama'
+        elif cl in ['banka adı', 'banka adi', 'banka']:
+            col_map[col] = 'Banka Adı'
+        elif cl in ['cari tanım (alıcı)', 'cari tanım (alıcı)sı', 'cari tanım', 'cari adı', 'alıcı']:
+            col_map[col] = 'Cari Tanım'
+        elif cl in ['fiş türü', 'fiş turu', 'islem turu', 'işlem türü']:
+            col_map[col] = 'Fiş Türü'
+        elif cl in ['hareket tipi', 'hareket yönü', 'borç/alacak', 'yön']:
+            col_map[col] = 'Hareket Tipi'
+        elif cl in ['proje', 'projesi', 'proje adı']:
+            col_map[col] = 'Proje'
+        elif cl in ['b/k/v', 'bkv']:
+            col_map[col] = 'B/K/V'
+        elif cl in ['tarih', 'i̇şlem tarihi', 'işlem tarihi', 'valör', 'tarihi', 'date', 'zaman']:
+            col_map[col] = 'Tarih'
     df_clean.rename(columns=col_map, inplace=True)
-    
-    # Tarih işlemleri
     if 'Tarih' in df_clean.columns:
+        # Tarih kolonunu string'e çevir
         df_clean['Tarih'] = df_clean['Tarih'].astype(str).str.strip()
         
-        # Unix timestamp kontrolü
-        sample_vals = df_clean['Tarih'].dropna().head(5).tolist()
-        is_unix = False
-        for val in sample_vals:
+        # Tarih formatını kontrol et (ilk non-empty değeri bul)
+        sample = ""
+        for val in df_clean['Tarih']:
             if val and val not in ['nan', 'none', 'NaT', '']:
-                if val.isdigit() and len(val) > 10:
-                    is_unix = True
-                    break
+                sample = val
+                break
         
-        if is_unix:
-            df_clean['Tarih'] = pd.to_datetime(pd.to_numeric(df_clean['Tarih'], errors='coerce'), unit='ms', errors='coerce')
-            mask = df_clean['Tarih'].notna()
-            df_clean.loc[mask, 'Tarih'] = df_clean.loc[mask, 'Tarih'].dt.strftime('%d.%m.%Y')
+        # Unix timestamp (milisaniye) kontrolü
+        if sample.isdigit() and len(sample) > 10:
+            # Milisaniye → datetime
+            df_clean['Tarih'] = pd.to_numeric(df_clean['Tarih'], errors='coerce')
+            dt = pd.to_datetime(df_clean['Tarih'], unit='ms', errors='coerce')
+            mask = dt.notna()
+            df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
             df_clean['Tarih'] = df_clean['Tarih'].fillna('')
-        elif sample_vals and re.match(r'\d{2}\.\d{2}\.\d{4}', str(sample_vals[0])):
+        # DD.MM.YYYY formatındaysa parse etme
+        elif re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
             pass  # Zaten doğru formatta
+        # YYYY-MM-DD veya diğer formatlar
         else:
-            df_clean['Tarih'] = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
-            mask = df_clean['Tarih'].notna()
-            df_clean.loc[mask, 'Tarih'] = df_clean.loc[mask, 'Tarih'].dt.strftime('%d.%m.%Y')
+            # Otomatik parse
+            dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
+            mask = dt.notna()
+            df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
             df_clean['Tarih'] = df_clean['Tarih'].fillna('')
         
+        # NaN/NaT değerleri boş string yap
         df_clean['Tarih'] = df_clean['Tarih'].replace(['nan', 'none', 'NaT', '<na>', 'nat', 'None', 'NAT'], '')
     else:
         df_clean['Tarih'] = ""
-    
-    # Tutar işlemleri - Vectorized
     if 'Tutar' not in df_clean.columns:
-        borç = _clean_amount_vectorized(df_clean.get('Borç', pd.Series([0]))) if 'Borç' in df_clean.columns else pd.Series(0.0, index=df_clean.index)
-        alacak = _clean_amount_vectorized(df_clean.get('Alacak', pd.Series([0]))) if 'Alacak' in df_clean.columns else pd.Series(0.0, index=df_clean.index)
-        df_clean['Tutar'] = np.where(borç > 0, borç, alacak)
+        borc = df_clean['Borç'].apply(_clean_amount) if 'Borç' in df_clean.columns else pd.Series(0.0, index=df_clean.index)
+        alacak = df_clean['Alacak'].apply(_clean_amount) if 'Alacak' in df_clean.columns else pd.Series(0.0, index=df_clean.index)
+        df_clean['Tutar'] = np.where(borc > 0, borc, alacak)
     else:
-        df_clean['Tutar'] = _clean_amount_vectorized(df_clean['Tutar'])
-    
-    # String kolonlar - Vectorized fillna
-    str_cols = ['Açıklama', 'Banka Adı', 'Cari Tanım', 'Fiş Türü', 'Hareket Tipi', 'Proje', 'B/K/V']
-    for col in str_cols:
+        df_clean['Tutar'] = df_clean['Tutar'].apply(_clean_amount)
+    for col in ['Açıklama', 'Banka Adı', 'Cari Tanım', 'Fiş Türü', 'Hareket Tipi', 'Proje', 'B/K/V']:
         if col not in df_clean.columns:
             df_clean[col] = ""
         else:
             df_clean[col] = df_clean[col].fillna("").astype(str).str.strip()
-    
-    # Muhasebe kolonları
-    mh_cols = ['Muhasebe Hesap Kodu', 'Muhasebe Hesap Adı', 'Banka Hesap Kodu', 'Eşleşen Kural ID', 'Muhasebe Notu']
-    for col in mh_cols:
+    for col in ['Muhasebe Hesap Kodu', 'Muhasebe Hesap Adı', 'Banka Hesap Kodu', 'Eşleşen Kural ID', 'Muhasebe Notu']:
         if col not in df_clean.columns:
             df_clean[col] = ""
-    
     if '_conflict_count' not in df_clean.columns:
         df_clean['_conflict_count'] = 0
+    
+    # KOLON SIRASI (Excel'deki gibi)
+    desired_order = [
+        'Proje', 'Muhasebe', 'Banka Adı', 'Cari Tanım', 'Unnamed: 4',
+        'Fiş Türü', 'Fiş No', 'Tarih', 'Özel Kod', 'Özel Kod 3',
+        'Borç', 'Alacak', 'Dövizli Borç', 'Dövizli Alacak', 'Hareket Sayısı',
+        'Açıklama', 'Tutar', 'Hareket Tipi', 'B/K/V',
+        'Muhasebe Hesap Kodu', 'Muhasebe Hesap Adı', 'Banka Hesap Kodu',
+        'Eşleşen Kural ID', 'Muhasebe Notu', '_conflict_count'
+    ]
+    
+    # Mevcut kolonları sırala (varsa)
+    existing_cols = [col for col in desired_order if col in df_clean.columns]
+    other_cols = [col for col in df_clean.columns if col not in desired_order]
+    
+    df_clean = df_clean[existing_cols + other_cols]
     
     return df_clean
 
 
 def apply_rules(df: pd.DataFrame, rules: List[Rule], bank_accounts: List[BankAccountDefinition]) -> Tuple[pd.DataFrame, ExecutionStats]:
-    """Yüksek performanslı kural motoru - VECTORIZED"""
     start_time = time.time()
-    
     if df is None or df.empty:
-        return (df if df is not None else pd.DataFrame()), ExecutionStats(
-            total_records=0, matched_records=0, unmatched_records=0, 
-            conflict_records=0, total_volume=0.0, execution_time_ms=0.0, match_rate_percentage=0.0
-        )
+        return (df if df is not None else pd.DataFrame()), ExecutionStats(total_records=0, matched_records=0, unmatched_records=0, conflict_records=0, total_volume=0.0, execution_time_ms=0.0, match_rate_percentage=0.0)
     
-    # Standarize
     df_proc = standardize_dataframe(df)
     total_rows = len(df_proc)
     
-    # Banka eşleştirmeleri - Vectorized
+    # DEBUG: İlk satırın kolonlarını ve değerlerini göster
+    if total_rows > 0:
+        print(f"[ENGINE] Kolonlar: {list(df_proc.columns)}")
+        print(f"[ENGINE] İlk satır Banka: '{df_proc['Banka Adı'].iloc[0]}'")
+        print(f"[ENGINE] İlk satır Cari: '{df_proc['Cari Tanım'].iloc[0]}'")
+        print(f"[ENGINE] İlk satır Fiş: '{df_proc['Fiş Türü'].iloc[0]}'")
+        print(f"[ENGINE] İlk satır Hareket: '{df_proc['Hareket Tipi'].iloc[0]}'")
+        print(f"[ENGINE] İlk satır Proje: '{df_proc['Proje'].iloc[0]}'")
+    
+    print(f"[ENGINE] {len(rules)} kural var")
+    for i, r in enumerate(rules[:3]):  # İlk 3 kuralı göster
+        print(f"[ENGINE] Kural {i+1}: {r.name}")
+        print(f"[ENGINE]   Kriterler: {r.criteria}")
+    
     if bank_accounts:
         bcm = {b.bank_name.strip().lower(): b.account_code for b in bank_accounts if b.bank_name}
         bnm = {b.bank_name.strip().lower(): b.account_name for b in bank_accounts if b.bank_name}
-        
         lb = df_proc['Banka Adı'].str.lower()
         df_proc['Banka Hesap Kodu'] = lb.map(bcm).fillna(df_proc['Banka Hesap Kodu'])
-        
-        # Vectorized where
-        has_bank = df_proc['Banka Hesap Kodu'] != ""
-        df_proc['Muhasebe Notu'] = np.where(has_bank, "Banka eşleşti: " + lb.map(bnm).fillna(""), df_proc['Muhasebe Noti'] if 'Muhasebe Notu' in df_proc.columns else "")
+        df_proc['Muhasebe Notu'] = np.where(df_proc['Banka Hesap Kodu'] != "", "Banka eşleşti: " + lb.map(bnm).fillna(""), df_proc['Muhasebe Notu'])
     
-    # Aktif kuralları filtrele ve sırala
     active_rules = sorted([r for r in rules if r.is_active], key=lambda x: x.priority)
-    
     if not active_rules:
-        total_volume = df_proc['Tutar'].sum()
-        return df_proc, ExecutionStats(
-            total_records=total_rows, matched_records=0, unmatched_records=total_rows,
-            conflict_records=0, total_volume=float(total_volume),
-            execution_time_ms=round((time.time() - start_time) * 1000, 2),
-            match_rate_percentage=0.0
-        )
+        return df_proc, ExecutionStats(total_records=total_rows, matched_records=0, unmatched_records=total_rows, conflict_records=0, total_volume=float(df_proc['Tutar'].sum()), execution_time_ms=round((time.time()-start_time)*1000, 2), match_rate_percentage=0.0)
     
-    # Vectorized kolonlar - Tüm dataframeleri bir kerede al
-    ca = df_proc['Açıklama'].str.casefold()
-    cc = df_proc['Cari Tanım'].str.casefold()
-    cb = df_proc['Banka Adı'].str.casefold()
-    cf = df_proc['Fiş Türü'].str.casefold()
-    ch = df_proc['Hareket Tipi'].str.casefold()
-    cp = df_proc['Proje'].str.casefold()
-    ck = df_proc['B/K/V'].str.casefold()
-    ct = df_proc['Tutar'].values
+    ca = df_proc['Açıklama'].str.casefold().tolist()
+    cc = df_proc['Cari Tanım'].str.casefold().tolist()
+    cb = df_proc['Banka Adı'].str.casefold().tolist()
+    cf = df_proc['Fiş Türü'].str.casefold().tolist()
+    ch = df_proc['Hareket Tipi'].str.casefold().tolist()
+    cp = df_proc['Proje'].str.casefold().tolist()
+    ck = df_proc['B/K/V'].str.casefold().tolist()
+    ct = df_proc['Tutar'].tolist()
     
-    # Sonuç arrays - numpy
-    matched_code = np.full(total_rows, "", dtype=object)
-    matched_name = np.full(total_rows, "", dtype=object)
-    matched_rule = np.full(total_rows, "", dtype=object)
-    matched_note = np.full(total_rows, "", dtype=object)
-    conflict_count = np.zeros(total_rows, dtype=int)
+    rc = [""] * total_rows
+    rn = [""] * total_rows
+    ri = [""] * total_rows
+    rno = [""] * total_rows
+    rco = [0] * total_rows
     
-    # Kural compiled - Her kural için criteria setleri
-    for rule in active_rules:
-        # Boş olmayan kriterleri set olarak sakla
-        criteria_sets = {}
-        min_amt = rule.min_amount
-        max_amt = rule.max_amount
-        
-        for k, v in rule.criteria.items():
+    compiled = []
+    for r in active_rules:
+        cd = {}
+        for k, v in r.criteria.items():
             if v and str(v).strip():
-                criteria_sets[k.lower()] = str(v).strip().casefold()
-        
-        if not criteria_sets:
-            # Kriter yoksa tüm satırlara uygula (sadece amount kontrolü)
-            mask = np.ones(total_rows, dtype=bool)
-            if min_amt is not None:
-                mask &= (ct >= min_amt)
-            if max_amt is not None:
-                mask &= (ct <= max_amt)
-            
-            # Sadece eşleşmemiş satırlara uygula
-            unmatched_mask = matched_code == ""
-            final_mask = mask & unmatched_mask
-            
-            # Çakışma kontrolü
-            has_conflict = (conflict_count > 0) & final_mask
-            
-            matched_code[has_conflict] = rule.target_account_code
-            matched_name[has_conflict] = rule.target_account_name or ""
-            matched_rule[has_conflict] = rule.name
-            matched_note[has_conflict] = f"⚠️ Çakışma ({conflict_count[has_conflict].astype(int) + 1} Kural)"
-            conflict_count[has_conflict] += 1
-            
-            # Yeni eşleşme
-            new_match = final_mask & ~has_conflict
-            matched_code[new_match] = rule.target_account_code
-            matched_name[new_match] = rule.target_account_name or ""
-            matched_rule[new_match] = rule.name
-            matched_note[new_match] = f"Kural: {rule.name}"
-            conflict_count[new_match] = 1
-            continue
-        
-        # Her kriter için vectorized mask
-        mask = np.ones(total_rows, dtype=bool)
-        
-        for k, val in criteria_sets.items():
-            if k in ['aciklama', 'açıklama']:
-                mask &= ca.str.contains(val, na=False)
-            elif k in ['cari_tanim', 'cari', 'cari tanım', 'alıcı']:
-                mask &= cc.str.contains(val, na=False)
-            elif k in ['banka_adi', 'banka', 'banka adı']:
-                mask &= cb.str.contains(val, na=False)
-            elif k in ['fis_turu', 'fiş türü', 'fis']:
-                mask &= cf.str.contains(val, na=False)
-            elif k in ['hareket_tipi', 'hareket', 'hareket tipi']:
-                mask &= ch.str.contains(val, na=False)
-            elif k in ['proje', 'projesi']:
-                mask &= cp.str.contains(val, na=False)
-            elif k in ['bkv', 'b/k/v']:
-                mask &= ck.str.contains(val, na=False)
-        
-        # Amount kontrolü
-        if min_amt is not None:
-            mask &= (ct >= min_amt)
-        if max_amt is not None:
-            mask &= (ct <= max_amt)
-        
-        # Sadece eşleşmemiş satırlara uygula
-        unmatched_mask = matched_code == ""
-        final_mask = mask & unmatched_mask
-        
-        # Çakışma varsa güncelle
-        has_conflict = (conflict_count > 0) & final_mask
-        if np.any(has_conflict):
-            matched_code[has_conflict] = rule.target_account_code
-            matched_name[has_conflict] = rule.target_account_name or ""
-            matched_rule[has_conflict] = rule.name
-            matched_note[has_conflict] = f"⚠️ Çakışma ({conflict_count[has_conflict].astype(int) + 1} Kural)"
-            conflict_count[has_conflict] += 1
-        
-        # Yeni eşleşme
-        new_match = final_mask & ~has_conflict
-        if np.any(new_match):
-            matched_code[new_match] = rule.target_account_code
-            matched_name[new_match] = rule.target_account_name or ""
-            matched_rule[new_match] = rule.name
-            matched_note[new_match] = f"Kural: {rule.name}"
-            conflict_count[new_match] = 1
+                cd[k.lower()] = str(v).strip().casefold()  # casefold kullan
+        compiled.append({'rule': r, 'criteria': cd, 'min_amt': r.min_amount, 'max_amt': r.max_amount})
+        print(f"[ENGINE] Compiled kriterler: {cd}")
     
-    # DataFrame'e ata
-    df_proc['Muhasebe Hesap Kodu'] = matched_code
-    df_proc['Muhasebe Hesap Adı'] = matched_name
-    df_proc['Eşleşen Kural ID'] = matched_rule
-    df_proc['Muhasebe Notu'] = matched_note
-    df_proc['_conflict_count'] = conflict_count
+    # İlk 5 satır için debug
+    debug_count = min(5, total_rows)
+    for i in range(debug_count):
+        print(f"[ENGINE] Satır {i}: Banka='{cb[i]}', Cari='{cc[i]}', Fiş='{cf[i]}', Hareket='{ch[i]}', Proje='{cp[i]}'")
     
-    # İstatistikler
+    for i in range(total_rows):
+        tv, av, cv, bv, fv, hv, pv, kv = ct[i], ca[i], cc[i], cb[i], cf[i], ch[i], cp[i], ck[i]
+        matched = []
+        for item in compiled:
+            r, crit = item['rule'], item['criteria']
+            if item['min_amt'] is not None and tv < item['min_amt']: continue
+            if item['max_amt'] is not None and tv > item['max_amt']: continue
+            ok = True
+            for k, val in crit.items():
+                if k in ['aciklama', 'açıklama']:
+                    if val not in av: ok = False; break
+                elif k in ['cari_tanim', 'cari', 'cari tanım', 'alıcı']:
+                    if val not in cv: ok = False; break
+                elif k in ['banka_adi', 'banka', 'banka adı']:
+                    if val not in bv: ok = False; break
+                elif k in ['fis_turu', 'fiş türü', 'fis']:
+                    if val not in fv: ok = False; break
+                elif k in ['hareket_tipi', 'hareket', 'hareket tipi']:
+                    if val != hv and val not in hv: ok = False; break
+                elif k in ['proje', 'projesi']:
+                    if val not in pv: ok = False; break
+                elif k in ['bkv', 'b/k/v']:
+                    if val not in kv: ok = False; break
+                elif k == 'regex':
+                    try:
+                        if not re.search(val, av + " " + cv, re.IGNORECASE): ok = False; break
+                    except re.error: ok = False; break
+            if ok:
+                matched.append(r)
+        if len(matched) == 1:
+            b = matched[0]
+            rc[i], rn[i], ri[i], rno[i], rco[i] = b.target_account_code, b.target_account_name or "", b.name, f"Kural: {b.name}", 1
+        elif len(matched) > 1:
+            b = matched[0]
+            rc[i], rn[i], ri[i], rco[i] = b.target_account_code, b.target_account_name or "", b.name, len(matched)
+            rno[i] = f"⚠️ Çakışma ({len(matched)} Kural): {', '.join([r.name for r in matched[:3]])}"
+    
+    df_proc['Muhasebe Hesap Kodu'] = rc
+    df_proc['Muhasebe Hesap Adı'] = rn
+    df_proc['Eşleşen Kural ID'] = ri
+    df_proc['Muhasebe Notu'] = rno
+    df_proc['_conflict_count'] = rco
+    
     ems = (time.time() - start_time) * 1000.0
-    mc = int((matched_code != "").sum())
-    conflicts = int((conflict_count > 1).sum())
-    
-    return df_proc, ExecutionStats(
-        total_records=total_rows, matched_records=mc,
-        unmatched_records=total_rows - mc, conflict_records=conflicts,
-        total_volume=float(df_proc['Tutar'].sum()),
-        execution_time_ms=round(ems, 2),
-        match_rate_percentage=round(mc / total_rows * 100, 2) if total_rows > 0 else 0.0
-    )
+    mc = sum(1 for c in rc if c != "")
+    return df_proc, ExecutionStats(total_records=total_rows, matched_records=mc, unmatched_records=total_rows-mc, conflict_records=sum(1 for c in rco if c > 1), total_volume=float(df_proc['Tutar'].sum()), execution_time_ms=round(ems, 2), match_rate_percentage=round(mc/total_rows*100, 2) if total_rows > 0 else 0.0)
 
 
 def find_conflicting_rules(rules: List[Rule]) -> List[Dict[str, Any]]:
-    """Çakışan kuralları bul - OPTİMİZE"""
     conflicts = []
     active = [r for r in rules if r.is_active]
-    
     for i in range(len(active)):
         for j in range(i + 1, len(active)):
             r1, r2 = active[i], active[j]
             c1 = {k: str(v).casefold().strip() for k, v in r1.criteria.items() if v}
             c2 = {k: str(v).casefold().strip() for k, v in r2.criteria.items() if v}
-            
             if c1 and c2 and (c1 == c2 or all(x in c2.items() for x in c1.items()) or all(x in c1.items() for x in c2.items())):
                 if r1.target_account_code != r2.target_account_code:
-                    conflicts.append({
-                        "rule1_name": r1.name, "rule1_code": r1.target_account_code,
-                        "rule2_name": r2.name, "rule2_code": r2.target_account_code,
-                        "shared_criteria": c1, "severity": "YÜKSEK" if c1 == c2 else "ORTA",
-                        "recommendation": "Öncelik değerlerini ayarlayın veya kriterleri ayrıştırın."
-                    })
+                    conflicts.append({"rule1_name": r1.name, "rule1_code": r1.target_account_code, "rule2_name": r2.name, "rule2_code": r2.target_account_code, "shared_criteria": c1, "severity": "YÜKSEK" if c1 == c2 else "ORTA", "recommendation": "Öncelik değerlerini ayarlayın veya kriterleri ayrıştırın."})
     return conflicts
 
 
 def filter_dataframe(df: pd.DataFrame, search_query: str = "", filters: Dict[str, Any] = None) -> pd.DataFrame:
-    """DataFrame'i filtrele - OPTİMİZE"""
     if df is None or df.empty:
         return pd.DataFrame()
-    
     filtered_df = df.copy()
-    
     if search_query and search_query.strip():
         q = search_query.strip().lower()
-        # Sadece object tipindeki kolonları ara
         mask = pd.Series(False, index=filtered_df.index)
         for col in filtered_df.columns:
             if filtered_df[col].dtype == object:
                 mask |= filtered_df[col].astype(str).str.lower().str.contains(q, na=False)
         filtered_df = filtered_df[mask]
-    
     if filters:
         for col, val in filters.items():
-            if val is None or val == "" or (isinstance(val, list) and len(val) == 0):
-                continue
+            if val is None or val == "" or (isinstance(val, list) and len(val) == 0): continue
             if col in filtered_df.columns:
                 if isinstance(val, list):
                     filtered_df = filtered_df[filtered_df[col].astype(str).isin([str(v) for v in val])]
                 elif isinstance(val, tuple) and len(val) == 2:
-                    if val[0] is not None:
-                        filtered_df = filtered_df[filtered_df[col] >= val[0]]
-                    if val[1] is not None:
-                        filtered_df = filtered_df[filtered_df[col] <= val[1]]
+                    if val[0] is not None: filtered_df = filtered_df[filtered_df[col] >= val[0]]
+                    if val[1] is not None: filtered_df = filtered_df[filtered_df[col] <= val[1]]
                 else:
                     filtered_df = filtered_df[filtered_df[col].astype(str).str.lower() == str(val).lower()]
-    
     return filtered_df

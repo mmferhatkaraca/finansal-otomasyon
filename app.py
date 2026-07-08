@@ -1,19 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Finansal Dashboard & Otomasyon Sistemi v7.0 - PERFORMANS OPTİMİZE
+Finansal Dashboard & Otomasyon Sistemi v6.0
 Kullanıcı Girişli, Supabase Destekli, Çok Firmalı, Kurumsal Web Dashboard
-
-Önemli Performans İyileştirmeleri:
-- Caching decorators
-- Minimal DB calls
-- Session state optimization
-- Async loading indicators
 """
 
 import os, re, json, time, zipfile
 from datetime import datetime
 from io import BytesIO
-from functools import lru_cache
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -33,7 +26,7 @@ except ImportError:
 # ==============================================================================
 # 1. SAYFA AYARLARI + CSS
 # ==============================================================================
-st.set_page_config(page_title="Finansal Otomasyon v7.0", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Finansal Otomasyon v6.0", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
 
 CUSTOM_CSS = """
 <style>
@@ -43,12 +36,11 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .main-header h1 { margin: 0; font-size: 1.75rem; font-weight: 700; color: #F8FAFC; }
 .main-header p { margin: 0.25rem 0 0 0; font-size: 0.9rem; color: #94A3B8; }
 .kpi-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-.kpi-card { background: #fff; border: 1px solid #E2E8F0; border-radius: 12px; padding: 1.25rem; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: transform 0.2s, box-shadow 0.2s; }
+.kpi-card { background: #fff; border: 1px solid #E2E8F0; border-radius: 12px; padding: 1.25rem; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
 .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px rgba(0,0,0,0.08); }
 .kpi-card-title { font-size: 0.85rem; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
 .kpi-card-value { font-size: 1.6rem; font-weight: 700; color: #0F172A; }
 .kpi-card-sub { font-size: 0.75rem; color: #10B981; font-weight: 500; margin-top: 0.25rem; }
-.stSpinner > div { border-color: #3B82F6 !important; }
 @media screen and (max-width: 768px) { .main-header { padding: 1rem; } .main-header h1 { font-size: 1.25rem; } .kpi-container { grid-template-columns: 1fr; } .kpi-card { padding: 0.75rem; } [data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; } }
 </style>
 """
@@ -63,258 +55,166 @@ if not is_logged_in():
     st.stop()
 
 current_user = get_current_user()
+db = Database()
 
 # ==============================================================================
-# 3. SESSION STATE + FİRMA YÖNETİMİ (OPTİMİZE)
+# 3. SESSION STATE + FİRMA YÖNETİMİ
 # ==============================================================================
-def init_session_state():
-    """Session state'i başlat - tüm değişkenleri initialize et"""
-    defaults = {
-        '_df_key': 0,
-        'current_company_id': 1,
-        '_last_company_id': None,
-        '_data_loaded': False,
-        '_cache_version': 0,
-        # Data değişkenleri
-        'rules': [],
-        'bank_accounts': [],
-        'hesap_plani': pd.DataFrame(),
-        'logs': [],
-        'raw_df': None,
-        'mapped_df': None,
-        'stats': None,
-        'logged_actions': [],
-    }
-    for key, val in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = val
-    
-    # DB cache için version
-    if 'db_cache_version' not in st.session_state:
-        st.session_state.db_cache_version = {}
-
-
-def load_company_data_cached(cid: int, force: bool = False):
-    """Belirli bir firma için tüm verileri DB'den yükler - CACHE'Lİ"""
-    cache_key = f"company_data_{cid}"
-    
-    # Cache kontrolü
-    if not force and st.session_state.get('_data_loaded') and st.session_state._last_company_id == cid:
-        return
-    
-    db = Database()
-    
+def load_company_data(cid):
+    """Belirli bir firma için tüm verileri DB'den yükler."""
     if db.online:
-        # Tüm verileri paralel yükle (aslında sıralı ama daha organize)
-        with st.spinner("📥 Veriler yükleniyor..."):
-            start = time.time()
-            
-            # Kurallar
-            rules_data = db.get_rules(cid, use_cache=True)
-            rules = [Rule(**r) for r in rules_data] if rules_data else []
-            
-            # Banka hesapları
-            banks_data = db.get_bank_accounts(cid, use_cache=True)
-            bank_accounts = [BankAccountDefinition(**b) for b in banks_data] if banks_data else []
-            
-            # Hesap planı
-            hp_data = db.get_hesap_plani(cid, use_cache=True)
-            hp_df = pd.DataFrame(hp_data).rename(columns={
-                'hesap_kodu': 'Hesap Kodu', 
-                'hesap_adi': 'Hesap Adı', 
-                'detay_eh': 'Detay E/H'
-            }) if hp_data else pd.DataFrame()
-            
-            # Loglar
-            logs = db.get_logs(200)
-            
-            print(f"[LOAD] Firma {cid}: {len(rules)} kurallar, {len(bank_accounts)} banka - {time.time()-start:.2f}s")
+        rules_data = db.get_rules(cid)
+        st.session_state.rules = [Rule(**r) for r in rules_data] if rules_data else []
+        print(f"[LOAD] Firma {cid}: {len(st.session_state.rules)} kural yüklendi")
         
-        # Session state'e kaydet
-        st.session_state.rules = rules
-        st.session_state.bank_accounts = bank_accounts
-        st.session_state.hesap_plani = hp_df
-        st.session_state.logs = logs
+        banks_data = db.get_bank_accounts(cid)
+        st.session_state.bank_accounts = [BankAccountDefinition(**b) for b in banks_data] if banks_data else []
         
-        # Fiş listesi
-        raw_data = db.load_raw_data(cid, use_cache=True)
+        hp_data = db.get_hesap_plani(cid)
+        st.session_state.hesap_plani = pd.DataFrame(hp_data).rename(columns={'hesap_kodu': 'Hesap Kodu', 'hesap_adi': 'Hesap Adı', 'detay_eh': 'Detay E/H'}) if hp_data else pd.DataFrame()
+        
+        st.session_state.logs = db.get_logs(200)
+        
+        # Fiş listesini DB'den yükle
+        st.session_state.raw_df = None
+        st.session_state.mapped_df = None
+        st.session_state.stats = None
+        raw_data = db.load_raw_data(cid)
         if raw_data and raw_data.get("value"):
             try:
                 st.session_state.raw_df = pd.DataFrame(raw_data["value"])
-                print(f"[LOAD] Fiş listesi: {len(st.session_state.raw_df)} satır")
+                print(f"[LOAD] Fiş listesi yüklendi: {len(st.session_state.raw_df)} satır")
             except Exception as e:
-                print(f"[LOAD] Fiş listesi hatası: {e}")
-                st.session_state.raw_df = None
+                print(f"[LOAD] Fiş listesi DataFrame hatası: {e}")
         else:
-            st.session_state.raw_df = None
+            print(f"[LOAD] Fiş listesi DB'de yok")
         
-        # Motor çalıştır (cache'li)
-        if st.session_state.raw_df is not None and len(st.session_state.rules) > 0:
+        # Motor çalıştır
+        if st.session_state.raw_df is not None:
             mapped_df, stats = apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
             st.session_state.mapped_df = mapped_df
             st.session_state.stats = stats
-            print(f"[LOAD] Motor: {stats.matched_records}/{stats.total_records} eşleşti - {stats.execution_time_ms:.0f}ms")
+            print(f"[LOAD] Motor çalıştı: {stats.matched_records}/{stats.total_records} eşleşti (%{stats.match_rate_percentage:.1f})")
+        
+        st.session_state.pop('hp_cache_key', None)
     else:
-        # Offline mode
-        for attr in ['rules', 'bank_accounts', 'logs']:
+        for attr in ['rules', 'bank_accounts']:
             if attr not in st.session_state:
-                st.session_state[attr] = [] if attr != 'logs' else []
+                st.session_state[attr] = []
         if 'hesap_plani' not in st.session_state:
             st.session_state.hesap_plani = pd.DataFrame()
+        if 'logs' not in st.session_state:
+            st.session_state.logs = []
         for attr in ['raw_df', 'mapped_df', 'stats']:
             if attr not in st.session_state:
                 st.session_state[attr] = None
-    
-    st.session_state._data_loaded = True
-    st.session_state._last_company_id = cid
 
+def init_session_state():
+    if '_df_key' not in st.session_state:
+        st.session_state._df_key = 0
+    if 'current_company_id' not in st.session_state:
+        st.session_state.current_company_id = 1
+    if 'current_company_name' not in st.session_state:
+        st.session_state.current_company_name = ""
+    if '_last_company_id' not in st.session_state:
+        st.session_state._last_company_id = None
+    cid = st.session_state.current_company_id
+    if st.session_state._last_company_id != cid:
+        load_company_data(cid)
+        st.session_state._last_company_id = cid
+
+init_session_state()
 
 def save_to_db():
-    """DB'ye kaydet - batch operations"""
     cid = st.session_state.current_company_id
-    db = Database()
-    
     if db.online:
-        # Cache'i invalidate et
-        db.invalidate_cache(f"rules_{cid}")
-        db.invalidate_cache(f"bank_accounts_{cid}")
-        
-        # Batch save
         db.save_rules([r.model_dump() for r in st.session_state.rules], cid)
         db.save_bank_accounts([b.model_dump() for b in st.session_state.bank_accounts], cid)
 
-
 def add_log(action, detail, level="INFO"):
-    """Log ekle - background olarak çalışır"""
     username = current_user.get("username", "system")
-    
-    # Session state'e hemen ekle (hızlı)
-    if 'logs' not in st.session_state:
-        st.session_state.logs = []
-    st.session_state.logs.insert(0, {
-        "time": datetime.now().strftime("%H:%M:%S"), 
-        "action": action, 
-        "detail": detail, 
-        "level": level, 
-        "username": username
-    })
-    
-    # DB'ye background olarak ekle (loglar için)
-    if 'logged_actions' not in st.session_state:
-        st.session_state.logged_actions = []
-    st.session_state.logged_actions.append((username, action, detail, level))
-
-
-def flush_logs():
-    """Biriktirilmiş logları DB'ye yaz"""
-    if hasattr(st.session_state, 'logged_actions') and st.session_state.logged_actions:
-        db = Database()
-        if db.online:
-            for username, action, detail, level in st.session_state.logged_actions:
-                db.add_log(username, action, detail, level)
-        st.session_state.logged_actions = []
-
+    st.session_state.logs.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "action": action, "detail": detail, "level": level, "username": username})
+    if db.online:
+        db.add_log(username, action, detail, level)
 
 def rerun_motor():
-    """Motoru yeniden çalıştır - minimal DB çağrısı"""
-    raw_df = st.session_state.raw_df
-    rules = st.session_state.rules
-    bank_accounts = st.session_state.bank_accounts
+    """Motoru yeniden çalıştır ve sayfayı yenile."""
+    # DB'den güncel kuralları yükle (session state senkronize olsun)
+    cid = st.session_state.current_company_id
+    if db.online:
+        rules_data = db.get_rules(cid)
+        if rules_data:
+            st.session_state.rules = [Rule(**r) for r in rules_data]
+        banks_data = db.get_bank_accounts(cid)
+        if banks_data:
+            st.session_state.bank_accounts = [BankAccountDefinition(**b) for b in banks_data]
     
-    if raw_df is not None and rules:
-        start = time.time()
-        mapped_df, stats = apply_rules(raw_df, rules, bank_accounts)
+    raw_df = st.session_state.raw_df
+    rules_count = len(st.session_state.rules)
+    print(f"[MOTOR] raw_df: {'YOK (None)' if raw_df is None else f'{len(raw_df)} satır'}, Kurallar: {rules_count}")
+    if raw_df is not None:
+        mapped_df, stats = apply_rules(raw_df, st.session_state.rules, st.session_state.bank_accounts)
         st.session_state.mapped_df = mapped_df
         st.session_state.stats = stats
-        print(f"[MOTOR] {stats.matched_records}/{stats.total_records} eşleşti - {time.time()-start:.3f}s")
+        print(f"[MOTOR] Sonuç: {stats.matched_records}/{stats.total_records} eşleşti (%{stats.match_rate_percentage:.1f})")
     else:
-        st.session_state.mapped_df = None
-        st.session_state.stats = None
-
+        print("[MOTOR] ⚠️ raw_df None! Fiş listesi yüklenmemiş.")
+    st.rerun()
 
 # ==============================================================================
-# 4. CACHE'Lİ HESAP LİSTESİ YARDIMCILARI
+# 4. HESAP LİSTESİ YARDIMCILARI
 # ==============================================================================
-@st.cache_data(ttl=300, show_spinner=False)
-def get_sorted_account_list(df_hp: pd.DataFrame) -> tuple:
-    """Hesap listesini sıralı olarak döner - CACHE'Lİ"""
+@st.cache_data(show_spinner=False)
+def get_sorted_account_list(df_hp):
     if df_hp is None or df_hp.empty or "Hesap Kodu" not in df_hp.columns or "Hesap Adı" not in df_hp.columns:
         return [""], {}
-    
     df_temp = df_hp.copy()
-    
-    # Detay filtreleme
     if "Detay E/H" in df_temp.columns:
         exclude = ['hayır', 'h', 'no', 'false', '0', 'pasif', 'hayir']
         df_temp = df_temp[~df_temp["Detay E/H"].astype(str).str.strip().str.lower().isin(exclude)]
-    
     df_temp["Hesap Kodu"] = df_temp["Hesap Kodu"].fillna("").astype(str).str.strip()
     df_temp["Hesap Adı"] = df_temp["Hesap Adı"].fillna("").astype(str).str.strip()
     df_temp = df_temp[df_temp["Hesap Kodu"] != ""]
     df_temp = df_temp[~df_temp["Hesap Kodu"].str.lower().isin(['nan', 'none', '<na>', 'nat', ''])]
     df_temp = df_temp[df_temp["Hesap Kodu"].str.contains(r'[0-9A-Za-z]', na=False)]
-    
-    # Sıralama
     def sort_key(c):
         parts = re.split(r'[\s\.\-_]+', str(c))
         return ".".join([f"{int(p):010d}" if p.isdigit() else p.lower() for p in parts])
-    
     df_temp["_sort"] = df_temp["Hesap Kodu"].apply(sort_key)
     df_sorted = df_temp.sort_values("_sort").reset_index(drop=True)
-    
     liste = [""] + (df_sorted["Hesap Kodu"] + " - " + df_sorted["Hesap Adı"]).tolist()
     code_idx = {kod: i+1 for i, kod in enumerate(df_sorted["Hesap Kodu"])}
-    
     return liste, code_idx
 
-
 def get_hesap_secenekleri():
-    """Hesap seçeneklerini cache'li olarak döner"""
     hp = st.session_state.hesap_plani
     cid = st.session_state.get('current_company_id', 1)
-    
-    # Cache key oluştur
-    hp_hash = f"{len(hp)}_{hash(tuple(hp['Hesap Kodu'].tolist()))}" if not hp.empty else "empty"
-    cache_key = f"hp_cache_{cid}_{hp_hash}"
-    
-    if st.session_state.get('_hp_cache_key') != cache_key:
+    current_key = f"c{cid}_empty" if hp.empty else f"c{cid}_{len(hp)}_{hash(tuple(hp['Hesap Kodu'].tolist()))}"
+    if st.session_state.get('hp_cache_key') != current_key:
         st.session_state.hp_list, st.session_state.hp_idx = get_sorted_account_list(hp)
-        st.session_state._hp_cache_key = cache_key
-    
+        st.session_state.hp_cache_key = current_key
     return st.session_state.get('hp_list', [""]), st.session_state.get('hp_idx', {})
 
-
 def render_account_selector(label, key_prefix, default_code=""):
-    """Hesap seçici widget - optimized"""
     hesap_list, code_idx = get_hesap_secenekleri()
-    
     if len(hesap_list) <= 1:
         t_code = st.text_input(f"{label} Kodu*", value=default_code, key=f"{key_prefix}_code")
         t_name = st.text_input(f"{label} Adı", value="", key=f"{key_prefix}_name")
         return t_code.strip(), t_name.strip()
-    
     def_idx = code_idx.get(default_code, 0) if default_code else 0
     secilen = st.selectbox(f"{label}*", options=hesap_list, index=min(def_idx, len(hesap_list)-1), key=f"{key_prefix}_sel")
-    
     t_code = secilen.split(" - ")[0].strip() if secilen else ""
     t_name = secilen.split(" - ", 1)[1].strip() if " - " in secilen else ""
-    
     return t_code, t_name
 
-
 # ==============================================================================
-# 5. SOL MENÜ (Sidebar) - OPTİMİZE
+# 5. SOL MENÜ (Sidebar)
 # ==============================================================================
-init_session_state()
-
 with st.sidebar:
     user_name = current_user.get("full_name", current_user.get("username", "Kullanıcı"))
     user_role = current_user.get("role", "user")
-    
-    st.markdown(f"### 🏢 **Finansal Otomasyon v7**")
+    st.markdown(f"### 🏢 **Finansal Otomasyon v6**")
     st.markdown(f"👤 **{user_name}** `({user_role})`")
-    
-    db = Database()
     st.caption(f"{'🟢 Supabase' if db.online else '🔴 Offline'}")
     st.markdown("---")
     
@@ -322,102 +222,87 @@ with st.sidebar:
     if db.online:
         uid = current_user.get("id", 0)
         companies = db.get_allowed_companies(uid, user_role)
-        
         if companies:
             comp_names = [f"{c['name']} ({c['code']})" for c in companies]
             cur_idx = next((i for i, c in enumerate(companies) if c['id'] == st.session_state.current_company_id), 0)
-            
             sel = st.selectbox("🏭 Firma", comp_names, index=cur_idx, key="company_select")
             sel_comp = companies[comp_names.index(sel)]
-            
             if sel_comp['id'] != st.session_state.current_company_id:
                 st.session_state.current_company_id = sel_comp['id']
                 st.session_state.current_company_name = sel_comp['name']
                 st.session_state._df_key += 1
-                st.session_state._data_loaded = False
-                load_company_data_cached(sel_comp['id'], force=True)
+                load_company_data(sel_comp['id'])
+                st.session_state._last_company_id = sel_comp['id']
                 st.rerun()
-            
             st.caption(f"🏭 **{sel_comp['name']}**")
         else:
             st.warning("⚠️ Firma tanımlı değil.")
-    
     st.markdown("---")
     
     menu_options = ["📊 İşlem Merkezi", "🏦 Banka Eşleştirmeleri", "📝 Kural Yöneticisi", "📈 Kural Analizi", "🧾 Zirve Aktarım", "🗂️ Resmi Hesap Listesi", "📜 Sistem Logları"]
     menu_icons = ["bar-chart-line-fill", "bank2", "sliders", "graph-up-arrow", "file-earmark-spreadsheet", "folder2-open", "journal-text"]
-    
     if is_admin():
         menu_options.append("👥 Yönetim")
         menu_icons.append("people-fill")
-    
     if HAS_OPTION_MENU:
-        menu = option_menu(None, menu_options, icons=menu_icons, default_index=0, styles={
-            "container": {"padding": "0!important"},
-            "icon": {"color": "#3B82F6"},
-            "nav-link": {"font-size": "0.85rem", "margin": "3px 0", "border-radius": "8px"},
-            "nav-link-selected": {"background-color": "#1E293B", "color": "#FFF"}
-        })
+        menu = option_menu(None, menu_options, icons=menu_icons, default_index=0, styles={"container": {"padding": "0!important"}, "icon": {"color": "#3B82F6"}, "nav-link": {"font-size": "0.85rem", "margin": "3px 0", "border-radius": "8px"}, "nav-link-selected": {"background-color": "#1E293B", "color": "#FFF"}})
     else:
         menu = st.radio("Modüller", menu_options, label_visibility="collapsed")
     
     st.markdown("---")
     st.subheader("📂 Veri Aktarımı")
-    
     uploaded_file = st.file_uploader("Yeni Ekstre Yükle", type=['xlsx', 'xls', 'csv'])
     
     if st.button("🔄 Motoru Çalıştır", type="primary", width="stretch"):
-        if st.session_state.get('raw_df') is not None:
-            with st.spinner("⚡ İşleniyor..."):
-                rerun_motor()
-            add_log("Motor Çalıştırıldı", f"{len(st.session_state.mapped_df or [])} satır", "INFO")
+        if st.session_state.raw_df is not None:
+            with st.spinner("İşleniyor..."):
+                mapped_df, stats = apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
+                st.session_state.mapped_df = mapped_df
+                st.session_state.stats = stats
+            add_log("Motor Çalıştırıldı", f"{len(mapped_df)} satır", "INFO")
             st.toast("⚡ Motor tamamlandı!", icon="⚡")
             st.rerun()
         else:
             st.warning("Ekstre dosyası yükleyin.")
     
     if uploaded_file:
+        # Aynı dosyayı tekrar işlemeyi önle
         uploaded_name = uploaded_file.name
         last_uploaded = st.session_state.get('_last_uploaded_file', '')
         
         if uploaded_name != last_uploaded:
             try:
-                with st.spinner("📊 Dosya işleniyor..."):
-                    fb = uploaded_file.read()
-                    df_new = pd.read_excel(BytesIO(fb)) if uploaded_file.name.endswith(('.xlsx', '.xls')) else pd.read_csv(BytesIO(fb))
-                    
-                    # DataFrame'i standardize et
-                    df_new = standardize_dataframe(df_new)
-                    st.session_state.raw_df = df_new
-                    st.session_state._last_uploaded_file = uploaded_name
-                    
-                    cid = st.session_state.current_company_id
-                    if db.online:
-                        # Tarih formatını düzelt
-                        df_for_json = df_new.copy()
-                        if 'Tarih' in df_for_json.columns:
-                            sample = str(df_for_json['Tarih'].iloc[0]) if len(df_for_json) > 0 else ""
-                            
-                            if sample.isdigit() and len(sample) > 10:
-                                dt = pd.to_datetime(df_for_json['Tarih'].astype(int), unit='ms', errors='coerce')
-                            else:
-                                dt = pd.to_datetime(df_for_json['Tarih'], format='%d.%m.%Y', errors='coerce')
-                            
-                            mask = dt.notna()
-                            df_for_json.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
+                fb = uploaded_file.read()
+                df_new = pd.read_excel(BytesIO(fb)) if uploaded_file.name.endswith(('.xlsx', '.xls')) else pd.read_csv(BytesIO(fb))
+                st.session_state.raw_df = df_new
+                st.session_state._last_uploaded_file = uploaded_name
+                cid = st.session_state.current_company_id
+                if db.online:
+                    # Tarihleri DD.MM.YYYY formatına çevir (Unix timestamp dahil)
+                    df_for_json = df_new.copy()
+                    if 'Tarih' in df_for_json.columns:
+                        sample = str(df_for_json['Tarih'].iloc[0]) if len(df_for_json) > 0 else ""
                         
-                        db.save_raw_data(df_for_json.to_dict(orient="records"), cid, current_user.get("username", "system"))
+                        # Unix timestamp (milisaniye) kontrolü
+                        if sample.isdigit() and len(sample) > 10:
+                            dt = pd.to_datetime(df_for_json['Tarih'].astype(int), unit='ms', errors='coerce')
+                        else:
+                            dt = pd.to_datetime(df_for_json['Tarih'], format='%d.%m.%Y', errors='coerce')
+                        
+                        mask = dt.notna()
+                        df_for_json.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
                     
-                    # Motor çalıştır
-                    rerun_motor()
-                    
-                    add_log("Dosya Yüklendi", f"{uploaded_file.name} ({len(df_new)} satır)", "SUCCESS")
-                    st.toast(f"✅ '{uploaded_file.name}' yüklendi!", icon="🎉")
-                    st.rerun()
+                    db.save_raw_data(df_for_json.to_dict(orient="records"), cid, current_user.get("username", "system"))
+                mapped_df, stats = apply_rules(df_new, st.session_state.rules, st.session_state.bank_accounts)
+                st.session_state.mapped_df = mapped_df
+                st.session_state.stats = stats
+                add_log("Dosya Yüklendi", f"{uploaded_file.name} ({len(df_new)} satır)", "SUCCESS")
+                st.toast(f"✅ '{uploaded_file.name}' yüklendi!", icon="🎉")
+                st.rerun()
             except Exception as e:
                 st.error(f"Dosya hatası: {e}")
     
-    if st.session_state.get('raw_df') is not None:
+    if st.session_state.raw_df is not None:
         st.caption(f"📋 Yüklü: **{len(st.session_state.raw_df)}** satır")
         if st.button("🗑️ Fiş Listesini Temizle", width="stretch"):
             st.session_state.raw_df = None
@@ -429,16 +314,10 @@ with st.sidebar:
             st.rerun()
     
     st.markdown("---")
-    active_rules = len([r for r in st.session_state.get('rules', []) if r.is_active])
-    st.caption(f"⚡ Kural: **{active_rules}** | 🏦 Banka: **{len(st.session_state.get('bank_accounts', []))}**")
-    
+    st.caption(f"⚡ Kural: **{len([r for r in st.session_state.rules if r.is_active])}** | 🏦 Banka: **{len(st.session_state.bank_accounts)}**")
     if st.button("🚪 Çıkış Yap", width="stretch"):
-        flush_logs()  # Logları kaydet
         logout()
         st.rerun()
-
-# Initial data load
-load_company_data_cached(st.session_state.current_company_id)
 
 # ==============================================================================
 # 6. HIZLI KURAL EKLEME DIALOG
@@ -475,12 +354,10 @@ def hizli_kural_dialog(row_data):
     
     st.markdown("##### 🎯 Hedef Muhasebe Hesabı")
     t_code, t_name = render_account_selector("Hesap Kodu", f"hizli_{row_data.name}", get_val(['Muhasebe Hesap Kodu']))
-    
     st.markdown("##### ⚙️ Kural Adı ve Öncelik")
     c1, c2 = st.columns([3, 1])
     with c1: r_name = st.text_input("Kural Adı*", value=f"Hızlı - {def_cari[:25] if def_cari else (def_aciklama[:25] if def_aciklama else 'Yeni')}", key="hk_name")
     with c2: r_priority = st.number_input("Öncelik", value=50, step=1, key="hk_prio")
-    
     st.markdown("##### 🔍 Eşleşme Kriterleri")
     k1, k2 = st.columns(2)
     with k1:
@@ -493,7 +370,6 @@ def hizli_kural_dialog(row_data):
         c_fis = st.text_input("Fiş Türü", value=def_fis, key="hk_fis")
         c_bkv = st.text_input("B/K/V", value=def_bkv, key="hk_bkv")
         r_max = st.text_input("Max Tutar (₺)", value="", key="hk_max")
-    
     h_opts = ["", "GELEN", "GIDEN", "KARISIK", "YOK"]
     try: h_idx = h_opts.index(def_hareket.upper()) if def_hareket.upper() in h_opts else 0
     except: h_idx = 0
@@ -516,51 +392,44 @@ def hizli_kural_dialog(row_data):
                     mx = float(r_max.replace(',', '.')) if r_max.strip() else None
                 except ValueError:
                     st.error("Tutar sayısal olmalıdır!"); return
-                
-                new_rule = Rule(
-                    name=r_name, priority=int(r_priority),
+                new_rule = Rule(name=r_name, priority=int(r_priority),
                     criteria={"proje": c_proje, "banka_adi": c_banka, "cari_tanim": c_cari, "bkv": c_bkv, "fis_turu": c_fis, "aciklama": c_aciklama, "hareket_tipi": c_hareket},
                     target_account_code=t_code, target_account_name=t_name, min_amount=mn, max_amount=mx,
-                    note="Hızlı Kural", created_by=current_user.get("username", "")
-                )
+                    note="Hızlı Kural", created_by=current_user.get("username", ""))
                 st.session_state.rules.append(new_rule)
                 save_to_db()
                 add_log("Hızlı Kural Eklendi", f"{r_name} -> {t_code}", "SUCCESS")
-                
                 # Dialog kapat + Motor çalıştır
                 st.session_state._df_key += 1
                 for key in list(st.session_state.keys()):
                     if key.startswith("hizli_") or key.startswith("hk_"):
                         del st.session_state[key]
-                
-                rerun_motor()
+                if st.session_state.raw_df is not None:
+                    mapped_df, stats = apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
+                    st.session_state.mapped_df = mapped_df
+                    st.session_state.stats = stats
                 st.toast(f"✅ '{r_name}' eklendi!", icon="🎉")
                 st.rerun()
             else:
                 st.error("⚠️ Kural Adı ve Hedef Hesap Kodu zorunludur!")
 
 # ==============================================================================
-# 7. İŞLEM MERKEZİ - OPTİMİZE
+# 7. İŞLEM MERKEZİ
 # ==============================================================================
 if menu == "📊 İşlem Merkezi":
     st.markdown('<div class="main-header"><h1>📊 İşlem Merkezi</h1><p>Filtreleme, hızlı kural ekleme ve muhasebeleştirme.</p></div>', unsafe_allow_html=True)
-    
     if st.session_state.mapped_df is not None and not st.session_state.mapped_df.empty:
         df = st.session_state.mapped_df.copy()
         stats = st.session_state.stats
-        
-        # KPI'lar - hızlı hesaplama
         conflict_col = df['_conflict_count'].fillna(0).astype(int) if '_conflict_count' in df.columns else pd.Series(0, index=df.index)
         hesap_bos = df['Muhasebe Hesap Kodu'].astype(str).str.strip().str.lower().isin(["", "nan", "none"])
         df.insert(0, 'Durum', np.where(conflict_col > 1, "🟡 Çakışma", np.where(hesap_bos, "⚪ Bekliyor", "🟢 Hazır")))
-        
         total = stats.total_records if stats else len(df)
         matched = stats.matched_records if stats else len(df[df['Durum']=='🟢 Hazır'])
         unmatched = stats.unmatched_records if stats else len(df[df['Durum']=='⚪ Bekliyor'])
         conflicts = stats.conflict_records if stats else len(df[df['Durum']=='🟡 Çakışma'])
         toplam_hacim = stats.total_volume if stats else float(df['Tutar'].sum())
         match_rate = stats.match_rate_percentage if stats else (matched/total*100 if total>0 else 0)
-        
         st.markdown(f"""<div class="kpi-container">
             <div class="kpi-card"><div class="kpi-card-title">📝 Toplam</div><div class="kpi-card-value">{total:,}</div></div>
             <div class="kpi-card"><div class="kpi-card-title">🟢 Hazır</div><div class="kpi-card-value" style="color:#10B981">{matched:,}</div><div class="kpi-card-sub">%{match_rate:.1f}</div></div>
@@ -578,22 +447,14 @@ if menu == "📊 İşlem Merkezi":
             with f3:
                 h_opts_f = sorted([str(x) for x in df['Hareket Tipi'].unique() if str(x).strip()]) if 'Hareket Tipi' in df.columns else []
                 hareket_f = st.multiselect("🔄 Hareket", h_opts_f, default=[], placeholder="Tümü")
-            
             f4, f5, f6, f7 = st.columns(4)
-            with f4: 
-                banka_opts = sorted([str(x) for x in df['Banka Adı'].unique() if str(x).strip()]) if 'Banka Adı' in df.columns else []
-                banka_f = st.multiselect("🏦 Banka", banka_opts, default=[], placeholder="Tümü")
-            with f5: 
-                fis_opts = sorted([str(x) for x in df['Fiş Türü'].unique() if str(x).strip()]) if 'Fiş Türü' in df.columns else []
-                fis_f = st.multiselect("📑 Fiş", fis_opts, default=[], placeholder="Tümü")
-            with f6: 
-                proje_opts = sorted([str(x) for x in df['Proje'].unique() if str(x).strip()]) if 'Proje' in df.columns else []
-                proje_f = st.multiselect("🎯 Proje", proje_opts, default=[], placeholder="Tümü")
+            with f4: banka_f = st.multiselect("🏦 Banka", sorted([str(x) for x in df['Banka Adı'].unique() if str(x).strip()]) if 'Banka Adı' in df.columns else [], placeholder="Tümü")
+            with f5: fis_f = st.multiselect("📑 Fiş", sorted([str(x) for x in df['Fiş Türü'].unique() if str(x).strip()]) if 'Fiş Türü' in df.columns else [], placeholder="Tümü")
+            with f6: proje_f = st.multiselect("🎯 Proje", sorted([str(x) for x in df['Proje'].unique() if str(x).strip()]) if 'Proje' in df.columns else [], placeholder="Tümü")
             with f7:
                 mn_a = float(df['Tutar'].min()) if 'Tutar' in df.columns and not df['Tutar'].empty else 0.0
                 mx_a = float(df['Tutar'].max()) if 'Tutar' in df.columns and not df['Tutar'].empty else 1.0
                 tutar_f = st.slider("💵 Tutar (₺)", mn_a, mx_a, (mn_a, mx_a), step=100.0) if mn_a < mx_a else (mn_a, mx_a)
-            
             ca1, ca2, ca3, ca4 = st.columns([2, 2, 3, 1])
             with ca1: k_kolon = st.selectbox("🎯 Kolon", ["(Seçilmedi)", "Açıklama", "Cari Tanım", "Muhasebe Hesap Kodu"])
             with ca2: k_op = st.selectbox("⚙️ Op", ["İçerir", "Başlar", "Biter", "Tam Eşleşir", "İçermez"])
@@ -602,7 +463,6 @@ if menu == "📊 İşlem Merkezi":
                 st.write(""); st.write("")
                 if st.button("🔄 Sıfırla", width="stretch"): st.rerun()
         
-        # Filtre uygula
         dd = df.copy()
         if durum_f: dd = dd[dd['Durum'].isin(durum_f)]
         if arama and arama.strip():
@@ -625,7 +485,6 @@ if menu == "📊 İşlem Merkezi":
             elif k_op == "Tam Eşleşir": dd = dd[cs.str.lower() == v.lower()]
             elif k_op == "İçermez": dd = dd[~cs.str.contains(v, case=False, na=False)]
         
-        # İndirme
         b1, b2 = st.columns([7, 3])
         with b1: st.markdown(f"**⚡ Gösterilen:** `{len(dd):,}` / `{len(df):,}`")
         with b2:
@@ -640,22 +499,18 @@ if menu == "📊 İşlem Merkezi":
                 "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
                 "Muhasebe Hesap Kodu": st.column_config.TextColumn("Muh. Kodu", width="medium"), "Muhasebe Hesap Adı": st.column_config.TextColumn("Muh. Adı", width="large"),
                 "Eşleşen Kural ID": st.column_config.TextColumn("Kural", width="medium")})
-        
         if len(event.selection.rows) > 0:
             hizli_kural_dialog(dd.iloc[event.selection.rows[0]])
     else:
         st.info("👈 Sol menüden ekstre yükleyin. DB'de kayıtlı veri varsa otomatik gelir.")
 
 # ==============================================================================
-# 8. BANKA EŞLEŞTİRMELERİ
+# 8-14. DİĞER MODÜLLER (Banka, Kural, Analiz, Zirve, Hesap, Log, Yönetim)
 # ==============================================================================
 elif menu == "🏦 Banka Eşleştirmeleri":
     st.markdown('<div class="main-header"><h1>🏦 Banka Eşleştirmeleri</h1></div>', unsafe_allow_html=True)
-    
-    eslesmis = [b.bank_name.strip() for b in st.session_state.get('bank_accounts', [])]
-    raw_df = st.session_state.get('raw_df')
-    yeni = sorted([str(b).strip() for b in (raw_df["Banka Adı"].dropna().unique().tolist() if raw_df is not None and "Banka Adı" in raw_df.columns else []) if str(b).strip() and str(b).strip() not in eslesmis]) if raw_df is not None else []
-    
+    eslesmis = [b.bank_name.strip() for b in st.session_state.bank_accounts]
+    yeni = sorted([str(b).strip() for b in (st.session_state.raw_df["Banka Adı"].dropna().unique().tolist() if st.session_state.raw_df is not None and "Banka Adı" in st.session_state.raw_df.columns else []) if str(b).strip() and str(b).strip() not in eslesmis]) if st.session_state.raw_df is not None else []
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("➕ Yeni Eşleştirme")
@@ -674,17 +529,14 @@ elif menu == "🏦 Banka Eşleştirmeleri":
                     st.toast(f"✅ '{b_name}' eşleştirildi!", icon="🏦")
                     rerun_motor()
     with c2:
-        st.subheader(f"📋 Kayıtlı ({len(st.session_state.get('bank_accounts', []))})")
-        if st.session_state.get('bank_accounts'):
+        st.subheader(f"📋 Kayıtlı ({len(st.session_state.bank_accounts)})")
+        if st.session_state.bank_accounts:
             st.dataframe(pd.DataFrame([{"Banka": b.bank_name, "Kod": b.account_code, "Hesap": b.account_name} for b in st.session_state.bank_accounts]), height=400, width="stretch")
             if st.button("🗑️ Tümünü Temizle", width="stretch"):
                 st.session_state.bank_accounts = []
                 save_to_db()
                 rerun_motor()
 
-# ==============================================================================
-# 9. KURAL YÖNETİCİSİ
-# ==============================================================================
 elif menu == "📝 Kural Yöneticisi":
     st.markdown('<div class="main-header"><h1>📝 Kural Yöneticisi</h1></div>', unsafe_allow_html=True)
     
@@ -790,9 +642,6 @@ elif menu == "📝 Kural Yöneticisi":
         else:
             st.success("🎉 Çakışma yok!")
 
-# ==============================================================================
-# 10. KURAL ANALİZİ
-# ==============================================================================
 elif menu == "📈 Kural Analizi":
     st.markdown('<div class="main-header"><h1>📈 Kural Analizi & Test</h1></div>', unsafe_allow_html=True)
     tab1, tab2, tab3 = st.tabs(["📊 Performans", "🧪 Test", "🤖 Öneri"])
@@ -804,7 +653,7 @@ elif menu == "📈 Kural Analizi":
             st.dataframe(pd.DataFrame(perf), width="stretch")
         else: st.info("Veri yükleyin.")
     with tab2:
-        if st.session_state.get('raw_df') is not None:
+        if st.session_state.raw_df is not None:
             raw_std = standardize_dataframe(st.session_state.raw_df.copy())
             with st.form("test_form"):
                 tk1, tk2 = st.columns(2)
@@ -837,9 +686,6 @@ elif menu == "📈 Kural Analizi":
             else: st.success("🎉 Tümü eşleştirilmiş!")
         else: st.info("Veri yükleyin.")
 
-# ==============================================================================
-# 11. ZİRVE AKTARIM
-# ==============================================================================
 elif menu == "🧾 Zirve Aktarım":
     st.markdown('<div class="main-header"><h1>🧾 Zirve Fiş Aktarımı</h1><p>Aylara bölünmüş Zirve muhasebe fiş formatı.</p></div>', unsafe_allow_html=True)
     if st.session_state.mapped_df is not None:
@@ -847,6 +693,7 @@ elif menu == "🧾 Zirve Aktarım":
         if len(df_h) == 0:
             st.warning("Hazır satır yok.")
         else:
+            # Tarih parse ve ay extraction
             if 'Borç' not in df_h.columns:
                 ba = df_h.apply(lambda r: (0.0, float(r.get('Tutar',0))) if 'GIDEN' in str(r.get('Hareket Tipi','')).upper() or 'GİDEN' in str(r.get('Hareket Tipi','')).upper() else (float(r.get('Tutar',0)), 0.0), axis=1, result_type='expand')
                 df_h['Borç'] = ba[0]; df_h['Alacak'] = ba[1]
@@ -857,10 +704,12 @@ elif menu == "🧾 Zirve Aktarım":
             aylar = sorted(df_h['_ay'].unique())
             ay_ad = {1:"Ocak",2:"Şubat",3:"Mart",4:"Nisan",5:"Mayıs",6:"Haziran",7:"Temmuz",8:"Ağustos",9:"Eylül",10:"Ekim",11:"Kasım",12:"Aralık",-1:"Tarihsiz"}
             
+            # AY SEÇİCİ
             st.subheader("📅 Aktarılacak Ayları Seçin")
             ay_options = [f"{ay} - {ay_ad.get(ay, 'Bilinmeyen')}" for ay in aylar]
             selected_aylar = st.multiselect("Aylar (boş = tüm aylar)", options=ay_options, default=[], help="Hangi ayları aktarmak istediğinizi seçin. Boş bırakırsanız tüm aylar aktarılır.")
             
+            # Seçilen ayları parse et
             if selected_aylar:
                 selected_ay_ids = [int(sel.split(" - ")[0]) for sel in selected_aylar]
                 df_h = df_h[df_h['_ay'].isin(selected_ay_ids)]
@@ -891,9 +740,6 @@ elif menu == "🧾 Zirve Aktarım":
     else:
         st.info("Veri yükleyin.")
 
-# ==============================================================================
-# 12. RESMİ HESAP LİSTESİ
-# ==============================================================================
 elif menu == "🗂️ Resmi Hesap Listesi":
     st.markdown('<div class="main-header"><h1>🗂️ Hesap Planı</h1></div>', unsafe_allow_html=True)
     hp_file = st.file_uploader("Hesap Planı Yükle", type=['xlsx','xls','csv'])
@@ -904,11 +750,11 @@ elif menu == "🗂️ Resmi Hesap Listesi":
             df_hp.columns = ['Hesap Kodu','Hesap Adı','Detay E/H']
             df_hp = df_hp.dropna(subset=['Hesap Kodu'])
             st.session_state.hesap_plani = df_hp
-            st.session_state.pop('_hp_cache_key', None)
             cid = st.session_state.current_company_id
             if db.online:
                 hp_list = [{"hesap_kodu": str(r.get("Hesap Kodu","")), "hesap_adi": str(r.get("Hesap Adı","")), "detay_eh": str(r.get("Detay E/H","Evet"))} for _, r in df_hp.iterrows()]
                 db.save_hesap_plani(hp_list, cid)
+            st.session_state.pop('hp_cache_key', None)
             add_log("Hesap Planı Yüklendi", f"{len(df_hp)} kayıt", "SUCCESS")
             st.toast(f"✅ {len(df_hp)} hesap yüklendi!", icon="🗂️")
             st.rerun()
@@ -917,17 +763,11 @@ elif menu == "🗂️ Resmi Hesap Listesi":
         st.caption(f"📋 Toplam: **{len(st.session_state.hesap_plani)}** kayıt")
         st.dataframe(st.session_state.hesap_plani, height=500, width="stretch")
 
-# ==============================================================================
-# 13. SİSTEM LOGLARI
-# ==============================================================================
 elif menu == "📜 Sistem Logları":
     st.markdown('<div class="main-header"><h1>📜 Sistem Logları</h1></div>', unsafe_allow_html=True)
     if st.session_state.logs: st.dataframe(pd.DataFrame(st.session_state.logs), height=550, width="stretch")
     else: st.info("Henüz log yok.")
 
-# ==============================================================================
-# 14. YÖNETİM PANELİ
-# ==============================================================================
 elif menu == "👥 Yönetim":
     if not is_admin(): st.error("⛔ Yetkiniz yok."); st.stop()
     st.markdown('<div class="main-header"><h1>👥 Yönetim Paneli</h1></div>', unsafe_allow_html=True)
@@ -1000,6 +840,3 @@ elif menu == "👥 Yönetim":
                 with bc2:
                     if st.button("🗑️ Sil", key=f"c{comp['id']}d"):
                         db.delete_company(comp['id']); st.rerun()
-
-# Flush logs on exit
-flush_logs()
