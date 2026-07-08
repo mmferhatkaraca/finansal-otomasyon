@@ -1,0 +1,357 @@
+# -*- coding: utf-8 -*-
+"""
+Supabase Veritabanı Bağlantı Modülü v6.0 - Çok Firmalı
+"""
+
+import os
+import math
+from typing import List, Dict, Any, Optional
+from supabase import create_client, Client
+
+
+def get_supabase_client() -> Optional[Client]:
+    try:
+        import streamlit as st
+        url = st.secrets.get("SUPABASE_URL", "")
+        key = st.secrets.get("SUPABASE_KEY", "")
+    except Exception:
+        url, key = "", ""
+    if not url or not key:
+        url = os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_KEY", "")
+    if not url or not key:
+        return None
+    try:
+        return create_client(url, key)
+    except Exception as e:
+        print(f"Supabase bağlantı hatası: {e}")
+        return None
+
+
+def _clean_value(v):
+    """Herhangi bir Python değerini JSON-uyumlu hale getirir."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return ""
+    if hasattr(v, 'isoformat'):
+        return str(v)
+    if hasattr(v, 'item'):
+        return v.item()
+    return v
+
+
+def _clean_dict(d: Dict) -> Dict:
+    """Dictionary'deki tüm değerleri JSON-uyumlu hale getirir."""
+    return {k: _clean_value(v) for k, v in d.items()}
+
+
+class Database:
+    """Çok firmalı Supabase veritabanı işlemleri."""
+    
+    def __init__(self):
+        self.client = get_supabase_client()
+        self.online = self.client is not None
+    
+    # =========================================================================
+    # FİRMA İŞLEMLERİ
+    # =========================================================================
+    def get_companies(self) -> List[Dict]:
+        if not self.online:
+            return []
+        try:
+            result = self.client.table("companies").select("*").eq("is_active", True).order("name").execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Firma listesi hatası: {e}")
+            return []
+    
+    def create_company(self, name: str, code: str, tax_number: str = "") -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("companies").insert({"name": name, "code": code, "tax_number": tax_number, "is_active": True}).execute()
+            return True
+        except Exception as e:
+            print(f"Firma oluşturma hatası: {e}")
+            return False
+    
+    def update_company(self, company_id: int, updates: Dict) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("companies").update(updates).eq("id", company_id).execute()
+            return True
+        except Exception as e:
+            print(f"Firma güncelleme hatası: {e}")
+            return False
+    
+    def delete_company(self, company_id: int) -> bool:
+        if not self.online:
+            return False
+        try:
+            for tbl in ["rules", "bank_accounts", "hesap_plani", "app_data"]:
+                self.client.table(tbl).delete().eq("company_id", company_id).execute()
+            self.client.table("companies").delete().eq("id", company_id).execute()
+            return True
+        except Exception as e:
+            print(f"Firma silme hatası: {e}")
+            return False
+    
+    # =========================================================================
+    # KULLANICI-FİRMA YETKİLENDİRME
+    # =========================================================================
+    def get_user_companies(self, user_id: int) -> List[int]:
+        if not self.online:
+            return []
+        try:
+            result = self.client.table("user_companies").select("company_id").eq("user_id", user_id).execute()
+            return [r["company_id"] for r in (result.data or [])]
+        except Exception as e:
+            print(f"Kullanıcı firma yetki hatası: {e}")
+            return []
+    
+    def set_user_companies(self, user_id: int, company_ids: List[int]) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("user_companies").delete().eq("user_id", user_id).execute()
+            for cid in company_ids:
+                self.client.table("user_companies").insert({"user_id": user_id, "company_id": cid}).execute()
+            return True
+        except Exception as e:
+            print(f"Kullanıcı firma yetki ayarlama hatası: {e}")
+            return False
+    
+    def get_allowed_companies(self, user_id: int, role: str) -> List[Dict]:
+        all_companies = self.get_companies()
+        if role == "admin":
+            return all_companies
+        allowed_ids = self.get_user_companies(user_id)
+        if not allowed_ids:
+            return all_companies
+        return [c for c in all_companies if c["id"] in allowed_ids]
+    
+    # =========================================================================
+    # KULLANICI İŞLEMLERİ
+    # =========================================================================
+    def get_user(self, username: str) -> Optional[Dict]:
+        if not self.online:
+            return None
+        try:
+            result = self.client.table("users").select("*").eq("username", username).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"Kullanıcı okuma hatası: {e}")
+            return None
+    
+    def get_all_users(self) -> List[Dict]:
+        if not self.online:
+            return []
+        try:
+            result = self.client.table("users").select("*").order("created_at").execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Kullanıcı listesi hatası: {e}")
+            return []
+    
+    def create_user(self, username: str, password_hash: str, full_name: str = "", role: str = "user") -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("users").insert({"username": username, "password_hash": password_hash, "full_name": full_name, "role": role, "is_active": True}).execute()
+            return True
+        except Exception as e:
+            print(f"Kullanıcı oluşturma hatası: {e}")
+            return False
+    
+    def update_user(self, user_id: int, updates: Dict) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("users").update(updates).eq("id", user_id).execute()
+            return True
+        except Exception as e:
+            print(f"Kullanıcı güncelleme hatası: {e}")
+            return False
+    
+    def delete_user(self, user_id: int) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("users").delete().eq("id", user_id).execute()
+            return True
+        except Exception as e:
+            print(f"Kullanıcı silme hatası: {e}")
+            return False
+    
+    # =========================================================================
+    # KURAL İŞLEMLERİ (Firma bazlı)
+    # =========================================================================
+    def get_rules(self, company_id: int = 1) -> List[Dict]:
+        if not self.online:
+            return []
+        try:
+            result = self.client.table("rules").select("*").eq("company_id", company_id).order("priority").execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Kural okuma hatası: {e}")
+            return []
+    
+    def save_rules(self, rules_data: List[Dict], company_id: int = 1) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("rules").delete().eq("company_id", company_id).execute()
+            for rule in rules_data:
+                clean = {k: v for k, v in rule.items() if k not in ['id', 'created_at']}
+                clean['company_id'] = company_id
+                self.client.table("rules").insert(clean).execute()
+            return True
+        except Exception as e:
+            print(f"Kural kaydetme hatası: {e}")
+            return False
+    
+    # =========================================================================
+    # BANKA HESABI İŞLEMLERİ (Firma bazlı)
+    # =========================================================================
+    def get_bank_accounts(self, company_id: int = 1) -> List[Dict]:
+        if not self.online:
+            return []
+        try:
+            result = self.client.table("bank_accounts").select("*").eq("company_id", company_id).order("bank_name").execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Banka okuma hatası: {e}")
+            return []
+    
+    def save_bank_accounts(self, accounts_data: List[Dict], company_id: int = 1) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("bank_accounts").delete().eq("company_id", company_id).execute()
+            for acc in accounts_data:
+                clean = {k: v for k, v in acc.items() if k not in ['id']}
+                clean['company_id'] = company_id
+                self.client.table("bank_accounts").insert(clean).execute()
+            return True
+        except Exception as e:
+            print(f"Banka kaydetme hatası: {e}")
+            return False
+    
+    # =========================================================================
+    # LOG İŞLEMLERİ
+    # =========================================================================
+    def add_log(self, username: str, action: str, detail: str, level: str = "INFO") -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("audit_logs").insert({"username": username, "action": action, "detail": detail, "level": level}).execute()
+            return True
+        except Exception as e:
+            print(f"Log hatası: {e}")
+            return False
+    
+    def get_logs(self, limit: int = 200) -> List[Dict]:
+        if not self.online:
+            return []
+        try:
+            result = self.client.table("audit_logs").select("*").order("created_at", desc=True).limit(limit).execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Log okuma hatası: {e}")
+            return []
+    
+    # =========================================================================
+    # HESAP PLANI İŞLEMLERİ (Firma bazlı - PAGINATION)
+    # =========================================================================
+    def get_hesap_plani(self, company_id: int = 1) -> List[Dict]:
+        """Pagination ile TÜM hesap planını çeker (Supabase 1000 satır limitini aşar)."""
+        if not self.online:
+            return []
+        try:
+            all_data = []
+            offset = 0
+            page_size = 500  # Daha küçük batch (güvenilir)
+            page_num = 0
+            while True:
+                page_num += 1
+                result = self.client.table("hesap_plani").select("*").eq("company_id", company_id).order("hesap_kodu").range(offset, offset + page_size - 1).execute()
+                batch = result.data or []
+                print(f"[Hesap Planı] Sayfa {page_num}: {len(batch)} kayıt (offset={offset})")
+                all_data.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+            print(f"[Hesap Planı] TOPLAM: {len(all_data)} kayıt")
+            return all_data
+        except Exception as e:
+            print(f"Hesap planı okuma hatası: {e}")
+            return []
+    
+    def save_hesap_plani(self, hesap_data: List[Dict], company_id: int = 1) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("hesap_plani").delete().eq("company_id", company_id).execute()
+            if hesap_data:
+                for i in range(0, len(hesap_data), 100):
+                    batch = []
+                    for row in hesap_data[i:i+100]:
+                        clean = {k: v for k, v in row.items() if k not in ['id']}
+                        clean['company_id'] = company_id
+                        batch.append(clean)
+                    self.client.table("hesap_plani").insert(batch).execute()
+            return True
+        except Exception as e:
+            print(f"Hesap planı kaydetme hatası: {e}")
+            return False
+    
+    # =========================================================================
+    # FİŞ LİSTESİ İŞLEMLERİ (Firma bazlı - JSON temizlikli)
+    # =========================================================================
+    def save_raw_data(self, df_dict: List[Dict], company_id: int = 1, username: str = "system") -> bool:
+        """Fiş listesini JSON olarak DB'ye kaydeder. Timestamp/NaN/Inf temizliği yapılır."""
+        if not self.online:
+            return False
+        try:
+            clean_data = [_clean_dict(row) for row in df_dict]
+            self.client.table("app_data").upsert({
+                "key": "raw_transactions",
+                "company_id": company_id,
+                "value": clean_data,
+                "updated_by": username
+            }).execute()
+            return True
+        except Exception as e:
+            print(f"Fiş listesi kaydetme hatası: {e}")
+            return False
+    
+    def load_raw_data(self, company_id: int = 1) -> Optional[Dict]:
+        if not self.online:
+            return None
+        try:
+            result = self.client.table("app_data").select("value, updated_at, updated_by").eq("key", "raw_transactions").eq("company_id", company_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"Fiş listesi okuma hatası: {e}")
+            return None
+    
+    def delete_raw_data(self, company_id: int = 1) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("app_data").delete().eq("key", "raw_transactions").eq("company_id", company_id).execute()
+            return True
+        except Exception as e:
+            print(f"Fiş listesi silme hatası: {e}")
+            return False
+    
+    def check_connection(self) -> bool:
+        if not self.online:
+            return False
+        try:
+            self.client.table("companies").select("id").limit(1).execute()
+            return True
+        except Exception:
+            return False

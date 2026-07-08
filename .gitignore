@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+
+# Streamlit SECRETS (ASLA GitHub'a yüklenmez!)
+.streamlit/secrets.toml
+
+# Yerel veriler
+rules.json
+bank_accounts.json
+hesap_plani.xlsx
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+uploads/
