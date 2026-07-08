@@ -67,25 +67,34 @@ def standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             col_map[col] = 'Tarih'
     df_clean.rename(columns=col_map, inplace=True)
     if 'Tarih' in df_clean.columns:
-        # Tarih formatını kontrol et
-        sample = str(df_clean['Tarih'].iloc[0]) if len(df_clean) > 0 else ""
+        # Tarih kolonunu string'e çevir
+        df_clean['Tarih'] = df_clean['Tarih'].astype(str).str.strip()
+        
+        # Tarih formatını kontrol et (ilk non-empty değeri bul)
+        sample = ""
+        for val in df_clean['Tarih']:
+            if val and val not in ['nan', 'none', 'NaT', '']:
+                sample = val
+                break
         
         # Unix timestamp (milisaniye) kontrolü
         if sample.isdigit() and len(sample) > 10:
             # Milisaniye → datetime
-            dt = pd.to_datetime(df_clean['Tarih'].astype(int), unit='ms', errors='coerce')
+            df_clean['Tarih'] = pd.to_numeric(df_clean['Tarih'], errors='coerce')
+            dt = pd.to_datetime(df_clean['Tarih'], unit='ms', errors='coerce')
             mask = dt.notna()
             df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
+            df_clean['Tarih'] = df_clean['Tarih'].fillna('')
         # DD.MM.YYYY formatındaysa parse etme
-        elif not re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
-            # Farklı formattaysa parse et
-            try:
-                dt = pd.to_datetime(df_clean['Tarih'], format='%d.%m.%Y', errors='coerce')
-            except:
-                dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
-            
+        elif re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
+            pass  # Zaten doğru formatta
+        # YYYY-MM-DD veya diğer formatlar
+        else:
+            # Otomatik parse
+            dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
             mask = dt.notna()
             df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
+            df_clean['Tarih'] = df_clean['Tarih'].fillna('')
         
         # NaN/NaT değerleri boş string yap
         df_clean['Tarih'] = df_clean['Tarih'].replace(['nan', 'none', 'NaT', '<na>', 'nat', 'None', 'NAT'], '')
