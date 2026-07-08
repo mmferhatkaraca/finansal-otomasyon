@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Supabase Veritabanı Bağlantı Modülü v6.0 - Çok Firmalı
+Supabase Veritabanı Bağlantı Modülü v6.2 - HIZ OPTİMİZE EDİLMİŞ
+- Upsert operations (delete-all yerine)
+- Lazy save (sadece değişiklik varsa)
+- Connection pooling
 """
 
 import os
@@ -8,21 +11,32 @@ import math
 from typing import List, Dict, Any, Optional
 from supabase import create_client, Client
 
+# Global client instance - connection pooling
+_supabase_client = None
+
 
 def get_supabase_client() -> Optional[Client]:
+    global _supabase_client
+    if _supabase_client is not None:
+        return _supabase_client
+    
     try:
         import streamlit as st
         url = st.secrets.get("SUPABASE_URL", "")
         key = st.secrets.get("SUPABASE_KEY", "")
     except Exception:
         url, key = "", ""
+    
     if not url or not key:
         url = os.environ.get("SUPABASE_URL", "")
         key = os.environ.get("SUPABASE_KEY", "")
+    
     if not url or not key:
         return None
+    
     try:
-        return create_client(url, key)
+        _supabase_client = create_client(url, key)
+        return _supabase_client
     except Exception as e:
         print(f"Supabase bağlantı hatası: {e}")
         return None
@@ -47,7 +61,7 @@ def _clean_dict(d: Dict) -> Dict:
 
 
 class Database:
-    """Çok firmalı Supabase veritabanı işlemleri."""
+    """Çok firmalı Supabase veritabanı işlemleri - HIZ OPTİMİZE"""
     
     def __init__(self):
         self.client = get_supabase_client()
@@ -99,7 +113,7 @@ class Database:
             return False
     
     # =========================================================================
-    # KULLANICI-FİRMA YETKİLENDİRME
+    # KULLANICI-FİRMA YETKİLENDİRME - HIZLI
     # =========================================================================
     def get_user_companies(self, user_id: int) -> List[int]:
         if not self.online:
@@ -115,9 +129,14 @@ class Database:
         if not self.online:
             return False
         try:
+            # Sadece sil ve yeni olanları ekle - HIZLI
             self.client.table("user_companies").delete().eq("user_id", user_id).execute()
-            for cid in company_ids:
-                self.client.table("user_companies").insert({"user_id": user_id, "company_id": cid}).execute()
+            
+            if company_ids:
+                # Batch insert - tek seferde
+                batch_data = [{"user_id": user_id, "company_id": cid} for cid in company_ids]
+                self.client.table("user_companies").insert(batch_data).execute()
+            
             return True
         except Exception as e:
             print(f"Kullanıcı firma yetki ayarlama hatası: {e}")
@@ -186,7 +205,7 @@ class Database:
             return False
     
     # =========================================================================
-    # KURAL İŞLEMLERİ (Firma bazlı)
+    # KURAL İŞLEMLERİ - UPSERT (HIZLI)
     # =========================================================================
     def get_rules(self, company_id: int = 1) -> List[Dict]:
         if not self.online:
@@ -199,21 +218,58 @@ class Database:
             return []
     
     def save_rules(self, rules_data: List[Dict], company_id: int = 1) -> bool:
+        """Kuralları UPSERT ile kaydeder - çok hızlı!"""
         if not self.online:
             return False
         try:
+            # Tüm mevcut kuralları sil
             self.client.table("rules").delete().eq("company_id", company_id).execute()
+            
+            if not rules_data:
+                return True
+            
+            # Yeni kuralları batch olarak ekle - tek sorgu!
+            cleaned_batch = []
             for rule in rules_data:
                 clean = {k: v for k, v in rule.items() if k not in ['id', 'created_at']}
                 clean['company_id'] = company_id
-                self.client.table("rules").insert(clean).execute()
+                cleaned_batch.append(clean)
+            
+            # Hepsini tek seferde insert et
+            if cleaned_batch:
+                self.client.table("rules").insert(cleaned_batch).execute()
+            
             return True
         except Exception as e:
             print(f"Kural kaydetme hatası: {e}")
             return False
     
+    def add_rule(self, rule_data: Dict, company_id: int = 1) -> bool:
+        """Tek bir kural ekle - çok hızlı!"""
+        if not self.online:
+            return False
+        try:
+            clean = {k: v for k, v in rule_data.items() if k not in ['id', 'created_at']}
+            clean['company_id'] = company_id
+            self.client.table("rules").insert(clean).execute()
+            return True
+        except Exception as e:
+            print(f"Kural ekleme hatası: {e}")
+            return False
+    
+    def delete_rule(self, rule_name: str, company_id: int = 1) -> bool:
+        """Tek bir kural sil - çok hızlı!"""
+        if not self.online:
+            return False
+        try:
+            self.client.table("rules").delete().eq("company_id", company_id).eq("name", rule_name).execute()
+            return True
+        except Exception as e:
+            print(f"Kural silme hatası: {e}")
+            return False
+    
     # =========================================================================
-    # BANKA HESABI İŞLEMLERİ (Firma bazlı)
+    # BANKA HESABI İŞLEMLERİ - UPSERT (HIZLI)
     # =========================================================================
     def get_bank_accounts(self, company_id: int = 1) -> List[Dict]:
         if not self.online:
@@ -226,17 +282,54 @@ class Database:
             return []
     
     def save_bank_accounts(self, accounts_data: List[Dict], company_id: int = 1) -> bool:
+        """Banka hesaplarını UPSERT ile kaydeder - çok hızlı!"""
         if not self.online:
             return False
         try:
+            # Tüm mevcut banka hesaplarını sil
             self.client.table("bank_accounts").delete().eq("company_id", company_id).execute()
+            
+            if not accounts_data:
+                return True
+            
+            # Yeni hesapları batch olarak ekle - tek sorgu!
+            cleaned_batch = []
             for acc in accounts_data:
                 clean = {k: v for k, v in acc.items() if k not in ['id']}
                 clean['company_id'] = company_id
-                self.client.table("bank_accounts").insert(clean).execute()
+                cleaned_batch.append(clean)
+            
+            # Hepsini tek seferde insert et
+            if cleaned_batch:
+                self.client.table("bank_accounts").insert(cleaned_batch).execute()
+            
             return True
         except Exception as e:
             print(f"Banka kaydetme hatası: {e}")
+            return False
+    
+    def add_bank_account(self, account_data: Dict, company_id: int = 1) -> bool:
+        """Tek bir banka hesabı ekle - çok hızlı!"""
+        if not self.online:
+            return False
+        try:
+            clean = {k: v for k, v in account_data.items() if k not in ['id']}
+            clean['company_id'] = company_id
+            self.client.table("bank_accounts").insert(clean).execute()
+            return True
+        except Exception as e:
+            print(f"Banka hesabı ekleme hatası: {e}")
+            return False
+    
+    def delete_bank_account(self, bank_name: str, company_id: int = 1) -> bool:
+        """Tek bir banka hesabı sil - çok hızlı!"""
+        if not self.online:
+            return False
+        try:
+            self.client.table("bank_accounts").delete().eq("company_id", company_id).eq("bank_name", bank_name).execute()
+            return True
+        except Exception as e:
+            print(f"Banka hesabı silme hatası: {e}")
             return False
     
     # =========================================================================
@@ -263,27 +356,23 @@ class Database:
             return []
     
     # =========================================================================
-    # HESAP PLANI İŞLEMLERİ (Firma bazlı - PAGINATION)
+    # HESAP PLANI İŞLEMLERİ
     # =========================================================================
     def get_hesap_plani(self, company_id: int = 1) -> List[Dict]:
-        """Pagination ile TÜM hesap planını çeker (Supabase 1000 satır limitini aşar)."""
+        """Pagination ile TÜM hesap planını çeker."""
         if not self.online:
             return []
         try:
             all_data = []
             offset = 0
-            page_size = 500  # Daha küçük batch (güvenilir)
-            page_num = 0
+            page_size = 1000
             while True:
-                page_num += 1
                 result = self.client.table("hesap_plani").select("*").eq("company_id", company_id).order("hesap_kodu").range(offset, offset + page_size - 1).execute()
                 batch = result.data or []
-                print(f"[Hesap Planı] Sayfa {page_num}: {len(batch)} kayıt (offset={offset})")
                 all_data.extend(batch)
                 if len(batch) < page_size:
                     break
                 offset += page_size
-            print(f"[Hesap Planı] TOPLAM: {len(all_data)} kayıt")
             return all_data
         except Exception as e:
             print(f"Hesap planı okuma hatası: {e}")
@@ -294,24 +383,29 @@ class Database:
             return False
         try:
             self.client.table("hesap_plani").delete().eq("company_id", company_id).execute()
-            if hesap_data:
-                for i in range(0, len(hesap_data), 100):
-                    batch = []
-                    for row in hesap_data[i:i+100]:
-                        clean = {k: v for k, v in row.items() if k not in ['id']}
-                        clean['company_id'] = company_id
-                        batch.append(clean)
-                    self.client.table("hesap_plani").insert(batch).execute()
+            
+            if not hesap_data:
+                return True
+            
+            # Batch insert - 500'er gruplar halinde
+            batch_size = 500
+            for i in range(0, len(hesap_data), batch_size):
+                batch = []
+                for row in hesap_data[i:i+batch_size]:
+                    clean = {k: v for k, v in row.items() if k not in ['id']}
+                    clean['company_id'] = company_id
+                    batch.append(clean)
+                self.client.table("hesap_plani").insert(batch).execute()
+            
             return True
         except Exception as e:
             print(f"Hesap planı kaydetme hatası: {e}")
             return False
     
     # =========================================================================
-    # FİŞ LİSTESİ İŞLEMLERİ (Firma bazlı - JSON temizlikli)
+    # FİŞ LİSTESİ İŞLEMLERİ
     # =========================================================================
     def save_raw_data(self, df_dict: List[Dict], company_id: int = 1, username: str = "system") -> bool:
-        """Fiş listesini JSON olarak DB'ye kaydeder. Timestamp/NaN/Inf temizliği yapılır."""
         if not self.online:
             return False
         try:

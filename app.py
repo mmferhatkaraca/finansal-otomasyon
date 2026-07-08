@@ -98,18 +98,24 @@ def load_company_data(cid):
         
         st.session_state.pop('hp_cache_key', None)
     else:
-        for attr in ['rules', 'bank_accounts']:
-            if attr not in st.session_state:
-                st.session_state[attr] = []
+        # Offline mode - tüm değişkenleri başlat
+        if 'rules' not in st.session_state:
+            st.session_state.rules = []
+        if 'bank_accounts' not in st.session_state:
+            st.session_state.bank_accounts = []
         if 'hesap_plani' not in st.session_state:
             st.session_state.hesap_plani = pd.DataFrame()
         if 'logs' not in st.session_state:
             st.session_state.logs = []
-        for attr in ['raw_df', 'mapped_df', 'stats']:
-            if attr not in st.session_state:
-                st.session_state[attr] = None
+        if 'raw_df' not in st.session_state:
+            st.session_state.raw_df = None
+        if 'mapped_df' not in st.session_state:
+            st.session_state.mapped_df = None
+        if 'stats' not in st.session_state:
+            st.session_state.stats = None
 
 def init_session_state():
+    """Session state'i başlat - tüm değişkenleri initialize et"""
     if '_df_key' not in st.session_state:
         st.session_state._df_key = 0
     if 'current_company_id' not in st.session_state:
@@ -118,6 +124,23 @@ def init_session_state():
         st.session_state.current_company_name = ""
     if '_last_company_id' not in st.session_state:
         st.session_state._last_company_id = None
+    
+    # Tüm data değişkenlerini başlat
+    if 'rules' not in st.session_state:
+        st.session_state.rules = []
+    if 'bank_accounts' not in st.session_state:
+        st.session_state.bank_accounts = []
+    if 'hesap_plani' not in st.session_state:
+        st.session_state.hesap_plani = pd.DataFrame()
+    if 'logs' not in st.session_state:
+        st.session_state.logs = []
+    if 'raw_df' not in st.session_state:
+        st.session_state.raw_df = None
+    if 'mapped_df' not in st.session_state:
+        st.session_state.mapped_df = None
+    if 'stats' not in st.session_state:
+        st.session_state.stats = None
+    
     cid = st.session_state.current_company_id
     if st.session_state._last_company_id != cid:
         load_company_data(cid)
@@ -126,10 +149,25 @@ def init_session_state():
 init_session_state()
 
 def save_to_db():
+    """DB'ye kaydet - optimize edilmiş"""
     cid = st.session_state.current_company_id
     if db.online:
         db.save_rules([r.model_dump() for r in st.session_state.rules], cid)
         db.save_bank_accounts([b.model_dump() for b in st.session_state.bank_accounts], cid)
+
+
+def save_bank_account_to_db(bank_account: BankAccountDefinition):
+    """Tek banka hesabı ekle - çok hızlı"""
+    cid = st.session_state.current_company_id
+    if db.online:
+        db.add_bank_account(bank_account.model_dump(), cid)
+
+
+def save_rule_to_db(rule: Rule):
+    """Tek kural ekle - çok hızlı"""
+    cid = st.session_state.current_company_id
+    if db.online:
+        db.add_rule(rule.model_dump(), cid)
 
 def add_log(action, detail, level="INFO"):
     username = current_user.get("username", "system")
@@ -523,8 +561,10 @@ elif menu == "🏦 Banka Eşleştirmeleri":
             t_code, t_name = render_account_selector("Hesap Kodu", "bank_map")
             if st.form_submit_button("Eşleştir", type="primary", width="stretch"):
                 if b_name and t_code:
-                    st.session_state.bank_accounts.append(BankAccountDefinition(bank_name=b_name.strip(), account_code=t_code, account_name=t_name))
-                    save_to_db()
+                    new_bank = BankAccountDefinition(bank_name=b_name.strip(), account_code=t_code, account_name=t_name)
+                    st.session_state.bank_accounts.append(new_bank)
+                    # Sadece yeni banka hesabını ekle - çok hızlı!
+                    save_bank_account_to_db(new_bank)
                     add_log("Banka Eşleştirildi", f"{b_name} -> {t_code}", "SUCCESS")
                     st.toast(f"✅ '{b_name}' eşleştirildi!", icon="🏦")
                     rerun_motor()
@@ -534,7 +574,9 @@ elif menu == "🏦 Banka Eşleştirmeleri":
             st.dataframe(pd.DataFrame([{"Banka": b.bank_name, "Kod": b.account_code, "Hesap": b.account_name} for b in st.session_state.bank_accounts]), height=400, width="stretch")
             if st.button("🗑️ Tümünü Temizle", width="stretch"):
                 st.session_state.bank_accounts = []
-                save_to_db()
+                # DB'den tüm banka hesaplarını sil
+                if db.online:
+                    db.client.table("bank_accounts").delete().eq("company_id", st.session_state.current_company_id).execute()
                 rerun_motor()
 
 elif menu == "📝 Kural Yöneticisi":
@@ -575,7 +617,11 @@ elif menu == "📝 Kural Yöneticisi":
                     st.session_state.rules[idx] = Rule(name=e_name, priority=int(e_prio),
                         criteria={"proje":e_proje,"banka_adi":e_banka,"cari_tanim":e_cari,"bkv":e_bkv,"fis_turu":e_fis,"aciklama":e_acik,"hareket_tipi":e_har},
                         target_account_code=e_code, target_account_name=e_name_acc, min_amount=mn, max_amount=mx, is_active=e_active, created_by=current_user.get("username",""))
-                    save_to_db()
+                    # DB'den tüm kuralları sil ve yeniden kaydet
+                    if db.online:
+                        db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
+                        if st.session_state.rules:
+                            db.save_rules([r.model_dump() for r in st.session_state.rules], st.session_state.current_company_id)
                     add_log("Kural Güncellendi", e_name, "SUCCESS")
                     st.toast(f"✅ '{e_name}' güncellendi!", icon="✏️")
                     rerun_motor()
@@ -598,14 +644,23 @@ elif menu == "📝 Kural Yöneticisi":
             with bc1:
                 if secilen and st.button(f"🗑️ {len(secilen)} Sil", type="primary", width="stretch"):
                     for i in sorted(secilen, reverse=True): st.session_state.rules.pop(i)
-                    save_to_db(); rerun_motor()
+                    # DB'den tüm kuralları sil ve yeniden kaydet
+                    if db.online:
+                        db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
+                        if st.session_state.rules:
+                            db.save_rules([r.model_dump() for r in st.session_state.rules], st.session_state.current_company_id)
+                    rerun_motor()
             with bc2:
                 kl = [f"{i+1}. {r.name}" for i, r in enumerate(st.session_state.rules)]
                 sec = st.selectbox("✏️ Düzenle", ["(Seçin...)"] + kl, key="edit_sel")
                 if sec != "(Seçin...)" and st.button("✏️ Düzenle", width="stretch"): kural_duzenle(kl.index(sec))
             with bc3:
                 if st.button("🗑️ TÜMÜNÜ Sil", width="stretch"):
-                    st.session_state.rules = []; save_to_db(); rerun_motor()
+                    st.session_state.rules = []
+                    # DB'den tüm kuralları sil
+                    if db.online:
+                        db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
+                    rerun_motor()
         else:
             st.info("Henüz kural yok.")
     with tab_add:
@@ -625,10 +680,12 @@ elif menu == "📝 Kural Yöneticisi":
                         mn = float(r_min.replace(',','.')) if r_min.strip() else None
                         mx = float(r_max.replace(',','.')) if r_max.strip() else None
                     except: st.error("Tutar sayısal!"); st.stop()
-                    st.session_state.rules.append(Rule(name=r_name, priority=int(r_prio),
+                    new_rule = Rule(name=r_name, priority=int(r_prio),
                         criteria={"proje":c_proje,"banka_adi":c_banka,"cari_tanim":c_cari,"bkv":c_bkv,"fis_turu":c_fis,"aciklama":c_acik,"hareket_tipi":c_har},
-                        target_account_code=t_code, target_account_name=t_name, min_amount=mn, max_amount=mx, created_by=current_user.get("username","")))
-                    save_to_db()
+                        target_account_code=t_code, target_account_name=t_name, min_amount=mn, max_amount=mx, created_by=current_user.get("username",""))
+                    st.session_state.rules.append(new_rule)
+                    # Sadece yeni kuralı ekle - çok hızlı!
+                    save_rule_to_db(new_rule)
                     add_log("Kural Eklendi", r_name, "SUCCESS")
                     st.toast(f"✅ '{r_name}' eklendi!", icon="🚀")
                     rerun_motor()
