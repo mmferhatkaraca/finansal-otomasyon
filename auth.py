@@ -95,6 +95,5 @@ def render_login_page():
                             st.rerun()
                         else:
                             st.error("❌ Geçersiz kullanıcı adı veya şifre.")
-        st.caption("💡 Varsayılan: `admin` / `admin123`")
         db = Database()
         st.caption("🟢 Supabase bağlı" if db.online else "🔴 Offline (admin/admin123)")
