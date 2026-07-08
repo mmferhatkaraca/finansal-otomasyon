@@ -68,13 +68,22 @@ current_user = get_current_user()
 # 3. SESSION STATE + FİRMA YÖNETİMİ (OPTİMİZE)
 # ==============================================================================
 def init_session_state():
-    """Session state'i başlat - minimal initialization"""
+    """Session state'i başlat - tüm değişkenleri initialize et"""
     defaults = {
         '_df_key': 0,
         'current_company_id': 1,
         '_last_company_id': None,
         '_data_loaded': False,
         '_cache_version': 0,
+        # Data değişkenleri
+        'rules': [],
+        'bank_accounts': [],
+        'hesap_plani': pd.DataFrame(),
+        'logs': [],
+        'raw_df': None,
+        'mapped_df': None,
+        'stats': None,
+        'logged_actions': [],
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -358,7 +367,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Yeni Ekstre Yükle", type=['xlsx', 'xls', 'csv'])
     
     if st.button("🔄 Motoru Çalıştır", type="primary", width="stretch"):
-        if st.session_state.raw_df is not None:
+        if st.session_state.get('raw_df') is not None:
             with st.spinner("⚡ İşleniyor..."):
                 rerun_motor()
             add_log("Motor Çalıştırıldı", f"{len(st.session_state.mapped_df or [])} satır", "INFO")
@@ -408,7 +417,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Dosya hatası: {e}")
     
-    if st.session_state.raw_df is not None:
+    if st.session_state.get('raw_df') is not None:
         st.caption(f"📋 Yüklü: **{len(st.session_state.raw_df)}** satır")
         if st.button("🗑️ Fiş Listesini Temizle", width="stretch"):
             st.session_state.raw_df = None
@@ -643,8 +652,9 @@ if menu == "📊 İşlem Merkezi":
 elif menu == "🏦 Banka Eşleştirmeleri":
     st.markdown('<div class="main-header"><h1>🏦 Banka Eşleştirmeleri</h1></div>', unsafe_allow_html=True)
     
-    eslesmis = [b.bank_name.strip() for b in st.session_state.bank_accounts]
-    yeni = sorted([str(b).strip() for b in (st.session_state.raw_df["Banka Adı"].dropna().unique().tolist() if st.session_state.raw_df is not None and "Banka Adı" in st.session_state.raw_df.columns else []) if str(b).strip() and str(b).strip() not in eslesmis]) if st.session_state.raw_df is not None else []
+    eslesmis = [b.bank_name.strip() for b in st.session_state.get('bank_accounts', [])]
+    raw_df = st.session_state.get('raw_df')
+    yeni = sorted([str(b).strip() for b in (raw_df["Banka Adı"].dropna().unique().tolist() if raw_df is not None and "Banka Adı" in raw_df.columns else []) if str(b).strip() and str(b).strip() not in eslesmis]) if raw_df is not None else []
     
     c1, c2 = st.columns(2)
     with c1:
@@ -664,8 +674,8 @@ elif menu == "🏦 Banka Eşleştirmeleri":
                     st.toast(f"✅ '{b_name}' eşleştirildi!", icon="🏦")
                     rerun_motor()
     with c2:
-        st.subheader(f"📋 Kayıtlı ({len(st.session_state.bank_accounts)})")
-        if st.session_state.bank_accounts:
+        st.subheader(f"📋 Kayıtlı ({len(st.session_state.get('bank_accounts', []))})")
+        if st.session_state.get('bank_accounts'):
             st.dataframe(pd.DataFrame([{"Banka": b.bank_name, "Kod": b.account_code, "Hesap": b.account_name} for b in st.session_state.bank_accounts]), height=400, width="stretch")
             if st.button("🗑️ Tümünü Temizle", width="stretch"):
                 st.session_state.bank_accounts = []
@@ -794,7 +804,7 @@ elif menu == "📈 Kural Analizi":
             st.dataframe(pd.DataFrame(perf), width="stretch")
         else: st.info("Veri yükleyin.")
     with tab2:
-        if st.session_state.raw_df is not None:
+        if st.session_state.get('raw_df') is not None:
             raw_std = standardize_dataframe(st.session_state.raw_df.copy())
             with st.form("test_form"):
                 tk1, tk2 = st.columns(2)
