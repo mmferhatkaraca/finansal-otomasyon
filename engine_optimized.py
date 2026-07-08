@@ -67,19 +67,20 @@ def standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             col_map[col] = 'Tarih'
     df_clean.rename(columns=col_map, inplace=True)
     if 'Tarih' in df_clean.columns:
-        # Önce DD.MM.YYYY formatını dene, sonra otomatik
-        try:
-            dt = pd.to_datetime(df_clean['Tarih'], format='%d.%m.%Y', errors='coerce')
-        except:
-            dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
-        
-        # Başarılı parse edilenleri DD.MM.YYYY formatına çevir
-        df_clean['Tarih'] = df_clean['Tarih'].astype(str).str.strip()
-        mask = dt.notna()
-        df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
+        # Tarih zaten DD.MM.YYYY formatındaysa parse etme!
+        sample = df_clean['Tarih'].astype(str).iloc[0] if len(df_clean) > 0 else ""
+        if not re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
+            # Sadece farklı formattaysa parse et
+            try:
+                dt = pd.to_datetime(df_clean['Tarih'], format='%d.%m.%Y', errors='coerce')
+            except:
+                dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
+            
+            mask = dt.notna()
+            df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
         
         # NaN/NaT değerleri boş string yap
-        df_clean['Tarih'] = df_clean['Tarih'].replace(['nan', 'none', 'NaT', '<na>', 'nat', 'None', 'NAT', ''], '')
+        df_clean['Tarih'] = df_clean['Tarih'].replace(['nan', 'none', 'NaT', '<na>', 'nat', 'None', 'NAT'], '')
     else:
         df_clean['Tarih'] = ""
     if 'Tutar' not in df_clean.columns:
@@ -98,6 +99,23 @@ def standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             df_clean[col] = ""
     if '_conflict_count' not in df_clean.columns:
         df_clean['_conflict_count'] = 0
+    
+    # KOLON SIRASI (Excel'deki gibi)
+    desired_order = [
+        'Proje', 'Muhasebe', 'Banka Adı', 'Cari Tanım', 'Unnamed: 4',
+        'Fiş Türü', 'Fiş No', 'Tarih', 'Özel Kod', 'Özel Kod 3',
+        'Borç', 'Alacak', 'Dövizli Borç', 'Dövizli Alacak', 'Hareket Sayısı',
+        'Açıklama', 'Tutar', 'Hareket Tipi', 'B/K/V',
+        'Muhasebe Hesap Kodu', 'Muhasebe Hesap Adı', 'Banka Hesap Kodu',
+        'Eşleşen Kural ID', 'Muhasebe Notu', '_conflict_count'
+    ]
+    
+    # Mevcut kolonları sırala (varsa)
+    existing_cols = [col for col in desired_order if col in df_clean.columns]
+    other_cols = [col for col in df_clean.columns if col not in desired_order]
+    
+    df_clean = df_clean[existing_cols + other_cols]
+    
     return df_clean
 
 
