@@ -59,6 +59,9 @@ v6_final/
 - 📝 Kural düzenleme/silme/toplu işlemler
 - 📈 Kural performans raporu + test modu + otomatik öneri
 - 🧾 Zirve muhasebe fiş aktarımı (aylara bölünmüş, tarih sıralı)
+  - ⚖️ Aktarım öncesi denge & veri kalitesi kontrolü (fiş dengesi, tarihsiz/sıfır/eksik satır uyarıları)
+  - 📄 Çoklu çıktı formatı: Excel (.xlsx), CSV (.csv, ; ayraç + BOM), Zirve TXT (.txt, sekme ayraçlı)
+  - 🔢 Benzersiz fiş numarası: ÖNEK + YIL + AY + sıra (farklı yılların aynı ayı artık çakışmaz)
 - 🗂️ Firma bazlı hesap planı
 - 💾 DB'de kalıcı veri (Excel yüklemeye gerek yok)
 - 📱 Mobil uyumlu arayüz

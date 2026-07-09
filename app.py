@@ -23,6 +23,12 @@ try:
 except ImportError:
     HAS_OPTION_MENU = False
 
+try:
+    from streamlit_searchbox import st_searchbox
+    HAS_SEARCHBOX = True
+except ImportError:
+    HAS_SEARCHBOX = False
+
 # ==============================================================================
 # 1. SAYFA AYARLARI + CSS
 # ==============================================================================
@@ -260,10 +266,43 @@ def render_account_selector(label, key_prefix, default_code=""):
         t_code = st.text_input(f"{label} Kodu*", value=default_code, key=f"{key_prefix}_code")
         t_name = st.text_input(f"{label} Adı", value="", key=f"{key_prefix}_name")
         return t_code.strip(), t_name.strip()
-    # Tek kutu: doğrudan selectbox içine yazıp filtrele. Liste hesap koduna göre sıralı gelir.
-    def_idx = code_idx.get(default_code, 0) if default_code else 0
-    secilen = st.selectbox(f"{label}*", options=hesap_list, index=min(def_idx, len(hesap_list)-1),
-                           key=f"{key_prefix}_sel", placeholder="Kod veya isim yazıp seçin...")
+
+    # TEK KUTU + HESAP KODU SIRALI FİLTRELEME:
+    # st_searchbox içine yazınca, arama fonksiyonu sonuçları BİZİM sıramızla döndürür
+    # (hesap_list zaten koda göre sıralı), böylece Streamlit'in alaka sıralaması devreye girmez.
+    if HAS_SEARCHBOX:
+        secenekler = hesap_list[1:]  # baştaki boş "" seçeneği hariç
+
+        def _ara(q: str):
+            q = (q or "").strip().lower()
+            if not q:
+                return secenekler  # boşken tam liste (kod sıralı)
+            # Sıralamayı KORUYARAK filtrele — sadece eşleşenler, kod sırasında
+            return [x for x in secenekler if q in x.lower()]
+
+        # Düzenleme ekranında mevcut kodu ön-seçili göster
+        default_label = None
+        if default_code and default_code in code_idx:
+            idx = code_idx[default_code]
+            if 0 <= idx < len(hesap_list):
+                default_label = hesap_list[idx]
+
+        st.caption(f"{label}*")
+        secilen = st_searchbox(
+            _ara,
+            key=f"{key_prefix}_sbox",
+            placeholder="Kod veya isim yazın (ör. 102, kuveyt)...",
+            default=default_label,
+            default_options=secenekler,
+            rerun_on_update=True,
+        )
+        secilen = secilen or default_label or ""
+    else:
+        # Fallback: searchbox kurulu değilse klasik selectbox
+        def_idx = code_idx.get(default_code, 0) if default_code else 0
+        secilen = st.selectbox(f"{label}*", options=hesap_list, index=min(def_idx, len(hesap_list)-1),
+                               key=f"{key_prefix}_sel", placeholder="Kod veya isim yazıp seçin...")
+
     t_code = secilen.split(" - ")[0].strip() if secilen else ""
     t_name = secilen.split(" - ", 1)[1].strip() if " - " in secilen else ""
     return t_code, t_name
@@ -587,14 +626,14 @@ elif menu == "🏦 Banka Eşleştirmeleri":
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("➕ Yeni Eşleştirme")
-        with st.form("bank_form", clear_on_submit=True):
+        with st.container(border=True):
             if yeni:
                 st.info(f"💡 Eşleşmemiş **{len(yeni)}** banka")
-                b_name = st.selectbox("Banka Seçin", [""] + yeni)
+                b_name = st.selectbox("Banka Seçin", [""] + yeni, key="bank_form_bname")
             else:
-                b_name = st.text_input("Banka Adı")
+                b_name = st.text_input("Banka Adı", key="bank_form_bname_txt")
             t_code, t_name = render_account_selector("Hesap Kodu", "bank_map")
-            if st.form_submit_button("Eşleştir", type="primary", width="stretch"):
+            if st.button("Eşleştir", type="primary", width="stretch", key="bank_form_submit"):
                 if b_name and t_code:
                     new_bank = BankAccountDefinition(bank_name=b_name.strip(), account_code=t_code, account_name=t_name)
                     st.session_state.bank_accounts.append(new_bank)
@@ -699,17 +738,17 @@ elif menu == "📝 Kural Yöneticisi":
         else:
             st.info("Henüz kural yok.")
     with tab_add:
-        with st.form("add_rule", clear_on_submit=True):
+        with st.container(border=True):
             c1, c2 = st.columns([3,1])
-            r_name = c1.text_input("Kural Adı*"); r_prio = c2.number_input("Öncelik", value=50, step=1)
+            r_name = c1.text_input("Kural Adı*", key="add_rule_name"); r_prio = c2.number_input("Öncelik", value=50, step=1, key="add_rule_prio")
             k1, k2 = st.columns(2)
-            with k1: c_proje = st.text_input("Proje"); c_banka = st.text_input("Banka"); c_cari = st.text_input("Cari"); c_bkv = st.text_input("B/K/V")
-            with k2: c_fis = st.text_input("Fiş"); c_acik = st.text_input("Açıklama"); c_har = st.selectbox("Hareket", ["","GELEN","GIDEN","KARISIK","YOK"])
+            with k1: c_proje = st.text_input("Proje", key="add_rule_proje"); c_banka = st.text_input("Banka", key="add_rule_banka"); c_cari = st.text_input("Cari", key="add_rule_cari"); c_bkv = st.text_input("B/K/V", key="add_rule_bkv")
+            with k2: c_fis = st.text_input("Fiş", key="add_rule_fis"); c_acik = st.text_input("Açıklama", key="add_rule_acik"); c_har = st.selectbox("Hareket", ["","GELEN","GIDEN","KARISIK","YOK"], key="add_rule_har")
             t_code, t_name = render_account_selector("Hedef Hesap", "add_rule")
             a1, a2 = st.columns(2)
-            with a1: r_min = st.text_input("Min ₺")
-            with a2: r_max = st.text_input("Max ₺")
-            if st.form_submit_button("🚀 Ekle", type="primary", width="stretch"):
+            with a1: r_min = st.text_input("Min ₺", key="add_rule_min")
+            with a2: r_max = st.text_input("Max ₺", key="add_rule_max")
+            if st.button("🚀 Ekle", type="primary", width="stretch", key="add_rule_submit"):
                 if r_name and t_code:
                     try:
                         mn = float(r_min.replace(',','.')) if r_min.strip() else None
