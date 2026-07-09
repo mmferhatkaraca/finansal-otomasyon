@@ -83,14 +83,18 @@ ALTER TABLE hesap_plani ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_data ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "allow_all_companies" ON companies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_users" ON users FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_usercomp" ON user_companies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_rules" ON rules FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_bank" ON bank_accounts FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_hesap" ON hesap_plani FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_logs" ON audit_logs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_appdata" ON app_data FOR ALL USING (true) WITH CHECK (true);
+-- GÜVENLİK: Yalnızca service_role (backend anahtarı) erişebilir.
+-- Public roller (anon/authenticated) bloklu. Ayrıntı ve sertleştirme: supabase_security.sql
+CREATE POLICY "service_role_only" ON companies      FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON users          FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON user_companies FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON rules          FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON bank_accounts  FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON hesap_plani    FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON audit_logs     FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_only" ON app_data       FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
 
 -- VARSAYILAN FİRMALAR
 INSERT INTO companies (name, code, tax_number) VALUES

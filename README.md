@@ -52,6 +52,13 @@ v6_final/
 ```
 
 ## 🎯 v6.0 Özellikleri
+- 🔐 **Güvenlik (v7.0)**: bcrypt şifreleme + brute-force kilidi + güçlü şifre politikası
+  - 🔑 Şifreler **bcrypt** ile hash'lenir (eski SHA-256 hesaplar girişte otomatik yükseltilir)
+  - 🚫 5 hatalı denemede **5 dakika hesap kilidi** (brute-force koruması)
+  - 💪 Güçlü şifre zorunlu (min 8 karakter, harf + rakam)
+  - 🛑 Offline backdoor kaldırıldı — DB yoksa giriş yok; admin şifresi artık sıfırlanmaz
+  - 🌐 REST API (`api.py`) **X-API-Key** ile korumalı + kısıtlı CORS
+  - 🗄️ Supabase **RLS** sertleştirme: `supabase_security.sql` (yalnızca service_role erişir)
 - 🔐 Kullanıcı giriş sistemi + rol bazlı yetkilendirme (admin/user/viewer)
   - 👑 **Admin**: tam yetki + Sistem Logları + Yönetim paneli
   - 👤 **User**: fiş/kural/banka/hesap planı ekleme-silme + Zirve (Loglar/Yönetim yok)

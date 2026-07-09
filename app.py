@@ -16,7 +16,7 @@ from engine_optimized import apply_rules, find_conflicting_rules, validate_colum
 from db import Database
 from auth import (render_login_page, login, logout, is_logged_in, get_current_user,
                   is_admin, init_default_admin, hash_password, verify_password,
-                  get_role, can_edit, is_viewer)
+                  get_role, can_edit, is_viewer, validate_password_strength)
 
 try:
     from streamlit_option_menu import option_menu
@@ -1099,8 +1099,9 @@ elif menu == "👤 Profilim":
                     db_user = db.get_user(uname)
                     if not db_user or not verify_password(mevcut_sifre, db_user.get("password_hash", "")):
                         st.error("❌ Mevcut şifre yanlış."); st.stop()
-                    if len(yeni_sifre) < 4:
-                        st.error("❌ Yeni şifre en az 4 karakter olmalı."); st.stop()
+                    _ok, _msg = validate_password_strength(yeni_sifre)
+                    if not _ok:
+                        st.error(f"❌ {_msg}"); st.stop()
                     if yeni_sifre != yeni_sifre2:
                         st.error("❌ Yeni şifreler eşleşmiyor."); st.stop()
                     updates["password_hash"] = hash_password(yeni_sifre)
@@ -1142,7 +1143,11 @@ elif menu == "👥 Yönetim":
                 with bc1:
                     if st.button("💾 Güncelle", key=f"u{u['id']}s"):
                         upd = {"full_name": nn, "role": nr, "is_active": na}
-                        if np_: upd["password_hash"] = hash_password(np_)
+                        if np_:
+                            _ok, _msg = validate_password_strength(np_)
+                            if not _ok:
+                                st.error(f"❌ Şifre: {_msg}"); st.stop()
+                            upd["password_hash"] = hash_password(np_)
                         db.update_user(u['id'], upd)
                         if all_comp and u.get('role') != 'admin':
                             db.set_user_companies(u['id'], [c['id'] for c in all_comp if f"{c['name']} ({c['code']})" in sc])
@@ -1160,7 +1165,10 @@ elif menu == "👥 Yönetim":
                 snc = st.multiselect("Firma Yetkisi (boş=tümü)", opts)
             if st.form_submit_button("➕ Ekle", type="primary", width="stretch"):
                 if nu and npw:
-                    if db.get_user(nu): st.error("Mevcut!")
+                    _ok, _msg = validate_password_strength(npw)
+                    if not _ok:
+                        st.error(f"❌ Şifre: {_msg}")
+                    elif db.get_user(nu): st.error("Mevcut!")
                     else:
                         db.create_user(nu, hash_password(npw), nf, nrl)
                         if all_comp and nrl != 'admin' and snc:
