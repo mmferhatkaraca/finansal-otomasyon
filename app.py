@@ -437,9 +437,7 @@ with st.sidebar:
 # 6. HIZLI KURAL EKLEME DIALOG
 # ==============================================================================
 def hizli_kural_dialog(row_data):
-    # NOT: Eskiden @st.dialog (modal) idi. Modal açılış gecikmesini kaldırmak için
-    # artık tablonun altında ANINDA dolan bir panel olarak render ediliyor.
-    st.markdown("### ⚡ Hızlı Kural Ekle")
+    # Kompakt inline panel: modal yok, tablonun altında anında açılır.
     def get_val(keys, default=""):
         for k in keys:
             if k in row_data.index:
@@ -447,7 +445,7 @@ def hizli_kural_dialog(row_data):
                 if val.lower() not in ['nan', 'none', '<na>', 'nat', '']:
                     return val.strip()
         return default
-    
+
     def_cari = get_val(['Cari Tanım', 'Cari Tanım (Alıcı)'])
     def_banka = get_val(['Banka Adı'])
     def_proje = get_val(['Proje'])
@@ -457,41 +455,44 @@ def hizli_kural_dialog(row_data):
     def_hareket = get_val(['Hareket Tipi'])
     def_tutar = get_val(['Tutar'], "0")
     def_tarih = get_val(['Tarih'])
-    
-    st.markdown(f"""<div style="background:#F8FAFC;border:1px solid #CBD5E1;border-radius:8px;padding:12px;margin-bottom:16px;">
-        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:0.85rem;">
-            <div><b>Tarih:</b> {def_tarih or '-'}</div>
-            <div><b>Banka:</b> <span style="color:#2563EB;font-weight:600">{def_banka or '-'}</span></div>
-            <div><b>Hareket:</b> {def_hareket or '-'}</div>
-            <div><b>Tutar:</b> <span style="color:#059669;font-weight:700">{def_tutar} ₺</span></div>
-        </div>
-        <div style="margin-top:6px;font-size:0.85rem;"><b>Cari:</b> {def_cari or '-'}<br><b>Açıklama:</b> <i>{def_aciklama or '-'}</i></div>
-    </div>""", unsafe_allow_html=True)
-    
-    st.markdown("##### 🎯 Hedef Muhasebe Hesabı")
-    t_code, t_name = render_account_selector("Hesap Kodu", f"hizli_{row_data.name}", get_val(['Muhasebe Hesap Kodu']))
-    st.markdown("##### ⚙️ Kural Adı ve Öncelik")
-    c1, c2 = st.columns([3, 1])
+
+    # Başlık + seçili satır özeti (tek kompakt satır)
+    st.markdown(
+        f"""<div style="font-weight:700;font-size:1rem;margin-bottom:6px;">⚡ Hızlı Kural Ekle</div>
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:0.8rem;line-height:1.5;">
+            📅 {def_tarih or '-'} &nbsp;·&nbsp; 🏦 <b style="color:#2563EB">{def_banka or '-'}</b> &nbsp;·&nbsp; 🔄 {def_hareket or '-'} &nbsp;·&nbsp; 💰 <b style="color:#059669">{def_tutar} ₺</b><br>
+            👤 {def_cari or '-'} &nbsp;·&nbsp; <i>{(def_aciklama[:60] + '…') if len(def_aciklama) > 60 else (def_aciklama or '-')}</i>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    # Hedef hesap + kural adı + öncelik → tek satır (3 kolon)
+    t_code, t_name = render_account_selector("🎯 Hedef Hesap", f"hizli_{row_data.name}", get_val(['Muhasebe Hesap Kodu']))
+    c1, c2 = st.columns([4, 1])
     with c1: r_name = st.text_input("Kural Adı*", value=f"Hızlı - {def_cari[:25] if def_cari else (def_aciklama[:25] if def_aciklama else 'Yeni')}", key="hk_name")
     with c2: r_priority = st.number_input("Öncelik", value=50, step=1, key="hk_prio")
-    st.markdown("##### 🔍 Eşleşme Kriterleri")
-    k1, k2 = st.columns(2)
+
+    # Eşleşme kriterleri → 3 kolonlu kompakt grid
+    st.caption("🔍 Eşleşme Kriterleri")
+    k1, k2, k3 = st.columns(3)
     with k1:
         c_cari = st.text_input("Cari Tanım", value=def_cari, key="hk_cari")
-        c_banka = st.text_input("Banka Adı", value=def_banka, key="hk_banka")
-        c_proje = st.text_input("Proje", value=def_proje, key="hk_proje")
-        r_min = st.text_input("Min Tutar (₺)", value="", key="hk_min")
-    with k2:
-        c_aciklama = st.text_input("Açıklama", value=def_aciklama, key="hk_acik")
         c_fis = st.text_input("Fiş Türü", value=def_fis, key="hk_fis")
+    with k2:
+        c_banka = st.text_input("Banka Adı", value=def_banka, key="hk_banka")
         c_bkv = st.text_input("B/K/V", value=def_bkv, key="hk_bkv")
-        r_max = st.text_input("Max Tutar (₺)", value="", key="hk_max")
+    with k3:
+        c_aciklama = st.text_input("Açıklama", value=def_aciklama, key="hk_acik")
+        c_proje = st.text_input("Proje", value=def_proje, key="hk_proje")
+    # Hareket + Min/Max tutar → tek satır (3 kolon)
     h_opts = ["", "GELEN", "GIDEN", "KARISIK", "YOK"]
     try: h_idx = h_opts.index(def_hareket.upper()) if def_hareket.upper() in h_opts else 0
     except: h_idx = 0
-    c_hareket = st.selectbox("Hareket Tipi", options=h_opts, index=h_idx, key="hk_hareket")
-    
-    st.write("")
+    a1, a2, a3 = st.columns(3)
+    with a1: c_hareket = st.selectbox("Hareket Tipi", options=h_opts, index=h_idx, key="hk_hareket")
+    with a2: r_min = st.text_input("Min Tutar (₺)", value="", key="hk_min")
+    with a3: r_max = st.text_input("Max Tutar (₺)", value="", key="hk_max")
+
     btn1, btn2 = st.columns([1, 2])
     with btn1:
         if st.button("❌ İptal", width="stretch"):
