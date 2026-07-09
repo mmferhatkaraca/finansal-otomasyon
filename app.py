@@ -792,20 +792,23 @@ elif menu == "🧾 Zirve Aktarım":
                 # DENGE & VERİ KALİTESİ KONTROLÜ - #6
                 # =====================================================================
                 st.subheader("⚖️ Denge ve Veri Kontrolü")
-                # Banka hareketi özeti (bilgi amaçlı; giren=çıkan olmak zorunda DEĞİL)
-                toplam_borc = float(df_h['Borç'].sum())
-                toplam_alacak = float(df_h['Alacak'].sum())
-
-                # Zirve çift-kayıt mantığı: her işlem hem borç hem alacak tarafına yazılır.
-                # Nihai fişte toplam Borçlu == toplam Alacaklı olmalıdır (asıl muhasebe dengesi).
-                nihai_borclu = toplam_borc + toplam_alacak
-                nihai_alacakli = toplam_alacak + toplam_borc
-                fis_dengesi = round(nihai_borclu - nihai_alacakli, 2)
+                # Banka hareketi özeti. NOT: Banka girişi ile çıkışı EŞİT OLMAK ZORUNDA DEĞİLDİR;
+                # aradaki fark dönemin net para hareketidir (giren - çıkan).
+                toplam_borc = float(df_h['Borç'].sum())     # banka girişleri (borç)
+                toplam_alacak = float(df_h['Alacak'].sum()) # banka çıkışları (alacak)
+                net_hareket = round(toplam_borc - toplam_alacak, 2)
 
                 mc1, mc2, mc3 = st.columns(3)
                 mc1.metric("Banka Girişi (Borç)", f"{toplam_borc:,.2f} ₺")
                 mc2.metric("Banka Çıkışı (Alacak)", f"{toplam_alacak:,.2f} ₺")
-                mc3.metric("Fiş Dengesi (B=A?)", "✅ Dengeli" if abs(fis_dengesi) < 0.01 else f"⚠️ {fis_dengesi:,.2f}")
+                mc3.metric("Net Hareket (Giriş − Çıkış)", f"{net_hareket:,.2f} ₺")
+                st.caption("ℹ️ Giriş ve çıkış eşit olmak zorunda değildir; fark, dönemin net para hareketidir.")
+
+                # Zirve çift-kayıt: her satır iki kayıt üretir (borç/alacak ters çevrilir),
+                # bu nedenle üretilecek fişte toplam Borçlu = toplam Alacaklı olur (yapısal denge).
+                fis_borclu = toplam_borc + toplam_alacak    # üretilecek fişteki toplam borçlu
+                fis_alacakli = toplam_alacak + toplam_borc  # üretilecek fişteki toplam alacaklı
+                st.caption(f"🧾 Oluşturulacak fiş — Toplam Borçlu: **{fis_borclu:,.2f} ₺** = Toplam Alacaklı: **{fis_alacakli:,.2f} ₺** (çift kayıt gereği eşit).")
 
                 # Veri kalitesi denetimleri (asıl önemli olanlar)
                 tarihsiz_sayi = int((df_h['_ay'] == -1).sum())
@@ -823,9 +826,9 @@ elif menu == "🧾 Zirve Aktarım":
                 if cift_yon > 0:
                     sorunlar.append(f"↔️ **{cift_yon}** satırda hem borç hem alacak dolu (yön belirsiz).")
 
-                if abs(fis_dengesi) < 0.01 and not sorunlar:
-                    st.success("✅ Fiş dengeli ve veri temiz. Aktarıma hazır.")
-                elif sorunlar:
+                if not sorunlar:
+                    st.success("✅ Veri temiz. Aktarıma hazır.")
+                else:
                     st.warning("⚠️ Aktarım öncesi kontrol edilmesi önerilen noktalar:")
                     for m in sorunlar:
                         st.markdown(f"- {m}")
