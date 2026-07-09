@@ -221,8 +221,9 @@ def get_sorted_account_list(df_hp):
         return [""], {}
     df_temp = df_hp.copy()
     if "Detay E/H" in df_temp.columns:
-        exclude = ['hayır', 'h', 'no', 'false', '0', 'pasif', 'hayir']
-        df_temp = df_temp[~df_temp["Detay E/H"].astype(str).str.strip().str.lower().isin(exclude)]
+        # Sadece "Detay = Evet" olan hesaplar listelensin (whitelist).
+        include = ['evet', 'e', 'yes', 'true', '1', 'aktif', 'var', 'y']
+        df_temp = df_temp[df_temp["Detay E/H"].astype(str).str.strip().str.lower().isin(include)]
     df_temp["Hesap Kodu"] = df_temp["Hesap Kodu"].fillna("").astype(str).str.strip()
     df_temp["Hesap Adı"] = df_temp["Hesap Adı"].fillna("").astype(str).str.strip()
     df_temp = df_temp[df_temp["Hesap Kodu"] != ""]
