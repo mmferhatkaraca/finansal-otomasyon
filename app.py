@@ -15,7 +15,8 @@ from models import Rule, BankAccountDefinition, ExecutionStats, User
 from engine_optimized import apply_rules, find_conflicting_rules, validate_columns, standardize_dataframe
 from db import Database
 from auth import (render_login_page, login, logout, is_logged_in, get_current_user,
-                  is_admin, init_default_admin, hash_password, verify_password)
+                  is_admin, init_default_admin, hash_password, verify_password,
+                  get_role, can_edit, is_viewer)
 
 try:
     from streamlit_option_menu import option_menu
@@ -326,9 +327,15 @@ with st.sidebar:
             st.warning("⚠️ Firma tanımlı değil.")
     st.markdown("---")
     
-    menu_options = ["📊 İşlem Merkezi", "🏦 Banka Eşleştirmeleri", "📝 Kural Yönetimi", "🧾 Zirve Aktarım", "🗂️ Resmi Hesap Listesi", "📜 Sistem Logları"]
-    menu_icons = ["bar-chart-line-fill", "bank2", "sliders", "file-earmark-spreadsheet", "folder2-open", "journal-text"]
+    menu_options = ["📊 İşlem Merkezi", "🏦 Banka Eşleştirmeleri", "📝 Kural Yönetimi", "🧾 Zirve Aktarım", "🗂️ Resmi Hesap Listesi"]
+    menu_icons = ["bar-chart-line-fill", "bank2", "sliders", "file-earmark-spreadsheet", "folder2-open"]
+    # Herkes kendi profilini yönetebilir
+    menu_options.append("👤 Profilim")
+    menu_icons.append("person-circle")
+    # Loglar ve Yönetim sadece admin
     if is_admin():
+        menu_options.append("📜 Sistem Logları")
+        menu_icons.append("journal-text")
         menu_options.append("👥 Yönetim")
         menu_icons.append("people-fill")
     if HAS_OPTION_MENU:
@@ -338,9 +345,14 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("📂 Veri Aktarımı")
-    uploaded_file = st.file_uploader("Yeni Ekstre Yükle", type=['xlsx', 'xls', 'csv'])
-    
-    if st.button("🔄 Motoru Çalıştır", type="primary", width="stretch"):
+    if not can_edit():
+        st.caption("👁️ Görüntüleme modu — veri yükleme/düzenleme yetkiniz yok.")
+    if can_edit():
+      uploaded_file = st.file_uploader("Yeni Ekstre Yükle", type=['xlsx', 'xls', 'csv'])
+    else:
+      uploaded_file = None
+
+    if can_edit() and st.button("🔄 Motoru Çalıştır", type="primary", width="stretch"):
         if st.session_state.raw_df is not None:
             with st.spinner("İşleniyor..."):
                 mapped_df, stats = cached_apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
@@ -403,7 +415,7 @@ with st.sidebar:
     
     if st.session_state.raw_df is not None:
         st.caption(f"📋 Yüklü: **{len(st.session_state.raw_df)}** satır")
-        if st.button("🗑️ Fiş Listesini Temizle", width="stretch"):
+        if can_edit() and st.button("🗑️ Fiş Listesini Temizle", width="stretch"):
             st.session_state.raw_df = None
             st.session_state.mapped_df = None
             st.session_state.stats = None
@@ -617,7 +629,10 @@ if menu == "📊 İşlem Merkezi":
                 dd.drop(columns=[c for c in ["Durum","_conflict_count"] if c in dd.columns], errors="ignore").to_excel(out, index=False, engine="openpyxl")
                 st.download_button("📥 XLSX İndir", data=out.getvalue(), file_name=f"islenmis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
 
-            st.caption("💡 Satıra tıklayarak hızlı kural ekleyebilirsiniz!")
+            if can_edit():
+                st.caption("💡 Satıra tıklayarak hızlı kural ekleyebilirsiniz!")
+            else:
+                st.caption("👁️ Görüntüleme modu — kural ekleyemezsiniz, tabloyu inceleyebilir/indirebilirsiniz.")
             # Performans: ekranda gösterilecek satır sayısını kullanıcı seçer (varsayılan 100).
             sc1, sc2 = st.columns([2, 8])
             with sc1:
@@ -635,9 +650,9 @@ if menu == "📊 İşlem Merkezi":
                     "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
                     "Muhasebe Hesap Kodu": st.column_config.TextColumn("Muh. Kodu", width="medium"), "Muhasebe Hesap Adı": st.column_config.TextColumn("Muh. Adı", width="large"),
                     "Eşleşen Kural ID": st.column_config.TextColumn("Kural", width="medium")})
-            # MODAL: satır seçilince açılır pencere olarak açılır.
+            # MODAL: satır seçilince açılır pencere olarak açılır (yalnızca düzenleme yetkisi olanlar).
             # Guard: aynı satır iptal/kaydet sonrası tekrar açılmasın.
-            if len(event.selection.rows) > 0:
+            if can_edit() and len(event.selection.rows) > 0:
                 sel_row = event.selection.rows[0]
                 if st.session_state.get("_dismissed_row") != sel_row:
                     st.session_state._active_dialog_row = sel_row
@@ -659,7 +674,10 @@ elif menu == "🏦 Banka Eşleştirmeleri":
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("➕ Yeni Eşleştirme")
-        with st.form("bank_form", clear_on_submit=True):
+        if not can_edit():
+            st.info("👁️ Görüntüleme modu — banka eşleştirme ekleyemezsiniz.")
+        if can_edit():
+          with st.form("bank_form", clear_on_submit=True):
             if yeni:
                 st.info(f"💡 Eşleşmemiş **{len(yeni)}** banka")
                 b_name = st.selectbox("Banka Seçin", [""] + yeni)
@@ -679,7 +697,7 @@ elif menu == "🏦 Banka Eşleştirmeleri":
         st.subheader(f"📋 Kayıtlı ({len(st.session_state.bank_accounts)})")
         if st.session_state.bank_accounts:
             st.dataframe(pd.DataFrame([{"Banka": b.bank_name, "Kod": b.account_code, "Hesap": b.account_name} for b in st.session_state.bank_accounts]), height=400, width="stretch")
-            if st.button("🗑️ Tümünü Temizle", width="stretch"):
+            if can_edit() and st.button("🗑️ Tümünü Temizle", width="stretch"):
                 st.session_state.bank_accounts = []
                 # DB'den tüm banka hesaplarını sil
                 if db.online:
@@ -745,34 +763,41 @@ elif menu == "📝 Kural Yönetimi":
                     "Hareket": r.criteria.get('hareket_tipi','') or "", "B/K/V": r.criteria.get('bkv','') or "",
                     "Min ₺": f"{r.min_amount:,.2f}" if r.min_amount else "", "Max ₺": f"{r.max_amount:,.2f}" if r.max_amount else ""})
             df_rules = pd.DataFrame(rule_data)
-            edited = st.data_editor(df_rules.drop(columns=["_idx"]), height=500, width="stretch", disabled=[c for c in df_rules.columns if c != "Seç"])
+            _disabled_cols = [c for c in df_rules.columns if c != "Seç"] if can_edit() else list(df_rules.drop(columns=["_idx"]).columns)
+            edited = st.data_editor(df_rules.drop(columns=["_idx"]), height=500, width="stretch", disabled=_disabled_cols)
             secilen = [int(df_rules.iloc[i]["_idx"]) for i, row in edited.iterrows() if row.get("Seç")]
-            st.markdown("---")
-            bc1, bc2, bc3 = st.columns([2,2,2])
-            with bc1:
-                if secilen and st.button(f"🗑️ {len(secilen)} Sil", type="primary", width="stretch"):
-                    for i in sorted(secilen, reverse=True): st.session_state.rules.pop(i)
-                    # DB'den tüm kuralları sil ve yeniden kaydet
-                    if db.online:
-                        db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
-                        if st.session_state.rules:
-                            db.save_rules([r.model_dump() for r in st.session_state.rules], st.session_state.current_company_id)
-                    rerun_motor()
-            with bc2:
-                kl = [f"{i+1}. {r.name}" for i, r in enumerate(st.session_state.rules)]
-                sec = st.selectbox("✏️ Düzenle", ["(Seçin...)"] + kl, key="edit_sel")
-                if sec != "(Seçin...)" and st.button("✏️ Düzenle", width="stretch"): kural_duzenle(kl.index(sec))
-            with bc3:
-                if st.button("🗑️ TÜMÜNÜ Sil", width="stretch"):
-                    st.session_state.rules = []
-                    # DB'den tüm kuralları sil
-                    if db.online:
-                        db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
-                    rerun_motor()
+            if can_edit():
+                st.markdown("---")
+                bc1, bc2, bc3 = st.columns([2,2,2])
+                with bc1:
+                    if secilen and st.button(f"🗑️ {len(secilen)} Sil", type="primary", width="stretch"):
+                        for i in sorted(secilen, reverse=True): st.session_state.rules.pop(i)
+                        # DB'den tüm kuralları sil ve yeniden kaydet
+                        if db.online:
+                            db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
+                            if st.session_state.rules:
+                                db.save_rules([r.model_dump() for r in st.session_state.rules], st.session_state.current_company_id)
+                        rerun_motor()
+                with bc2:
+                    kl = [f"{i+1}. {r.name}" for i, r in enumerate(st.session_state.rules)]
+                    sec = st.selectbox("✏️ Düzenle", ["(Seçin...)"] + kl, key="edit_sel")
+                    if sec != "(Seçin...)" and st.button("✏️ Düzenle", width="stretch"): kural_duzenle(kl.index(sec))
+                with bc3:
+                    if st.button("🗑️ TÜMÜNÜ Sil", width="stretch"):
+                        st.session_state.rules = []
+                        # DB'den tüm kuralları sil
+                        if db.online:
+                            db.client.table("rules").delete().eq("company_id", st.session_state.current_company_id).execute()
+                        rerun_motor()
+            else:
+                st.caption("👁️ Görüntüleme modu — kuralları inceleyebilirsiniz, düzenleme/silme yetkiniz yok.")
         else:
             st.info("Henüz kural yok.")
     with tab_add:
-        with st.form("add_rule", clear_on_submit=True):
+        if not can_edit():
+            st.info("👁️ Görüntüleme modu — kural ekleyemezsiniz.")
+        if can_edit():
+          with st.form("add_rule", clear_on_submit=True):
             c1, c2 = st.columns([3,1])
             r_name = c1.text_input("Kural Adı*"); r_prio = c2.number_input("Öncelik", value=50, step=1)
             k1, k2 = st.columns(2)
@@ -1018,7 +1043,9 @@ elif menu == "🧾 Zirve Aktarım":
 
 elif menu == "🗂️ Resmi Hesap Listesi":
     st.markdown('<div class="main-header"><h1>🗂️ Hesap Planı</h1></div>', unsafe_allow_html=True)
-    hp_file = st.file_uploader("Hesap Planı Yükle", type=['xlsx','xls','csv'])
+    if not can_edit():
+        st.caption("👁️ Görüntüleme modu — hesap planı yükleyemezsiniz.")
+    hp_file = st.file_uploader("Hesap Planı Yükle", type=['xlsx','xls','csv']) if can_edit() else None
     if hp_file:
         try:
             fb = hp_file.read()
@@ -1040,12 +1067,59 @@ elif menu == "🗂️ Resmi Hesap Listesi":
         st.dataframe(st.session_state.hesap_plani, height=500, width="stretch")
 
 elif menu == "📜 Sistem Logları":
+    if not is_admin(): st.error("⛔ Bu bölüm yalnızca yöneticiler içindir."); st.stop()
     st.markdown('<div class="main-header"><h1>📜 Sistem Logları</h1></div>', unsafe_allow_html=True)
     if st.session_state.logs: st.dataframe(pd.DataFrame(st.session_state.logs), height=550, width="stretch")
     else: st.info("Henüz log yok.")
 
+elif menu == "👤 Profilim":
+    st.markdown('<div class="main-header"><h1>👤 Profilim</h1><p>Ad ve şifrenizi güncelleyin.</p></div>', unsafe_allow_html=True)
+    uname = current_user.get("username", "")
+    urole = current_user.get("role", "viewer")
+    uid = current_user.get("id", 0)
+    st.info(f"👤 Kullanıcı: **{uname}**  ·  Rol: **{urole}**")
+
+    if not db.online:
+        st.warning("⚠️ Offline modda profil değiştirilemez (Supabase bağlantısı gerekli).")
+    else:
+        with st.form("profil_form"):
+            st.markdown("##### 📝 Ad Soyad")
+            yeni_ad = st.text_input("Tam Ad", value=current_user.get("full_name", ""))
+            st.markdown("##### 🔒 Şifre Değiştir (opsiyonel)")
+            mevcut_sifre = st.text_input("Mevcut Şifre", type="password", help="Şifre değiştirmek için doldurun.")
+            yeni_sifre = st.text_input("Yeni Şifre", type="password")
+            yeni_sifre2 = st.text_input("Yeni Şifre (Tekrar)", type="password")
+            if st.form_submit_button("💾 Kaydet", type="primary", width="stretch"):
+                updates = {}
+                # Ad değişikliği
+                if yeni_ad.strip() and yeni_ad.strip() != current_user.get("full_name", ""):
+                    updates["full_name"] = yeni_ad.strip()
+                # Şifre değişikliği istendiyse doğrula
+                if yeni_sifre or yeni_sifre2 or mevcut_sifre:
+                    db_user = db.get_user(uname)
+                    if not db_user or not verify_password(mevcut_sifre, db_user.get("password_hash", "")):
+                        st.error("❌ Mevcut şifre yanlış."); st.stop()
+                    if len(yeni_sifre) < 4:
+                        st.error("❌ Yeni şifre en az 4 karakter olmalı."); st.stop()
+                    if yeni_sifre != yeni_sifre2:
+                        st.error("❌ Yeni şifreler eşleşmiyor."); st.stop()
+                    updates["password_hash"] = hash_password(yeni_sifre)
+                if not updates:
+                    st.info("Değişiklik yok."); st.stop()
+                if db.update_user(uid, updates):
+                    # Oturumdaki kullanıcı bilgisini de güncelle
+                    if "full_name" in updates:
+                        st.session_state.user["full_name"] = updates["full_name"]
+                    add_log("Profil Güncellendi", f"{uname} kendi profilini güncelledi", "INFO")
+                    st.success("✅ Profiliniz güncellendi!")
+                    if "password_hash" in updates:
+                        st.info("🔑 Şifreniz değişti. Bir sonraki girişte yeni şifrenizi kullanın.")
+                    st.rerun()
+                else:
+                    st.error("❌ Güncelleme başarısız (bağlantı sorunu).")
+
 elif menu == "👥 Yönetim":
-    if not is_admin(): st.error("⛔ Yetkiniz yok."); st.stop()
+    if not is_admin(): st.error("⛔ Bu bölüm yalnızca yöneticiler içindir."); st.stop()
     st.markdown('<div class="main-header"><h1>👥 Yönetim Paneli</h1></div>', unsafe_allow_html=True)
     all_comp = db.get_companies() if db.online else []
     tab_u, tab_au, tab_c = st.tabs(["📋 Kullanıcılar", "➕ Kullanıcı Ekle", "🏭 Firmalar"])

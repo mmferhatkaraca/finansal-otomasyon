@@ -52,7 +52,11 @@ v6_final/
 ```
 
 ## 🎯 v6.0 Özellikleri
-- 🔐 Kullanıcı giriş sistemi (admin/user/viewer)
+- 🔐 Kullanıcı giriş sistemi + rol bazlı yetkilendirme (admin/user/viewer)
+  - 👑 **Admin**: tam yetki + Sistem Logları + Yönetim paneli
+  - 👤 **User**: fiş/kural/banka/hesap planı ekleme-silme + Zirve (Loglar/Yönetim yok)
+  - 👁️ **Viewer**: sadece görüntüleme + indirme (XLSX/Zirve); ekleme/silme yok
+  - 👤 **Profilim**: her kullanıcı kendi ad ve şifresini değiştirir (admin herkese müdahale eder)
 - 🏭 Çok firma desteği (A, B, C, D firmaları)
 - 📊 Detaylı filtreleme paneli
 - ⚡ Hızlı kural ekleme (satıra tıklayarak)

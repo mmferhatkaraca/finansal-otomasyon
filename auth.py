@@ -53,6 +53,17 @@ def get_current_user() -> dict:
 def is_admin() -> bool:
     return get_current_user().get("role", "") == "admin"
 
+def get_role() -> str:
+    """Aktif kullanıcının rolü: 'admin', 'user' veya 'viewer'."""
+    return get_current_user().get("role", "viewer")
+
+def can_edit() -> bool:
+    """Ekleme/silme/değiştirme yetkisi (admin + user). Viewer False döner."""
+    return get_role() in ("admin", "user")
+
+def is_viewer() -> bool:
+    return get_role() == "viewer"
+
 def init_default_admin():
     db = Database()
     if not db.online:
