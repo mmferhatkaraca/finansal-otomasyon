@@ -67,37 +67,43 @@ def standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             col_map[col] = 'Tarih'
     df_clean.rename(columns=col_map, inplace=True)
     if 'Tarih' in df_clean.columns:
-        # Tarih kolonunu string'e çevir
+        # Tarih kolonunu string'e çevir (object dtype olarak, sonradan string atanabilsin)
         df_clean['Tarih'] = df_clean['Tarih'].astype(str).str.strip()
-        
+        df_clean['Tarih'] = df_clean['Tarih'].astype(object)
+
         # Tarih formatını kontrol et (ilk non-empty değeri bul)
         sample = ""
         for val in df_clean['Tarih']:
-            if val and val not in ['nan', 'none', 'NaT', '']:
-                sample = val
+            if val and val not in ['nan', 'none', 'NaT', '', 'None', '<NA>']:
+                sample = str(val).strip()
                 break
-        
+
         # Unix timestamp (milisaniye) kontrolü
         if sample.isdigit() and len(sample) > 10:
             # Milisaniye → datetime
-            df_clean['Tarih'] = pd.to_numeric(df_clean['Tarih'], errors='coerce')
-            dt = pd.to_datetime(df_clean['Tarih'], unit='ms', errors='coerce')
-            mask = dt.notna()
-            df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
-            df_clean['Tarih'] = df_clean['Tarih'].fillna('')
-        # DD.MM.YYYY formatındaysa parse etme
-        elif re.match(r'\d{2}\.\d{2}\.\d{4}', sample):
-            pass  # Zaten doğru formatta
-        # YYYY-MM-DD veya diğer formatlar
-        else:
-            # Otomatik parse
+            ts = pd.to_numeric(df_clean['Tarih'], errors='coerce')
+            dt = pd.to_datetime(ts, unit='ms', errors='coerce')
+        # DD.MM.YYYY veya DD/MM/YYYY (Türkçe gün-önce formatı) → gün önce
+        elif re.match(r'^\d{1,2}[./]\d{1,2}[./]\d{2,4}', sample):
             dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
-            mask = dt.notna()
-            df_clean.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
-            df_clean['Tarih'] = df_clean['Tarih'].fillna('')
-        
+        # ISO / yıl-önce formatları (YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, zaman damgalı) → yıl/ay/gün
+        # NOT: Burada dayfirst=True KULLANILMAZ, aksi halde gün ile ay yer değiştirir.
+        elif re.match(r'^\d{4}[-./]\d{1,2}[-./]\d{1,2}', sample):
+            dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=False)
+        # Diğer belirsiz formatlar → Türkçe varsayımı ile gün önce
+        else:
+            dt = pd.to_datetime(df_clean['Tarih'], errors='coerce', dayfirst=True)
+
+        # Parse edilebilenleri DD.MM.YYYY olarak normalize et, gerisini boş bırak
+        result = pd.Series([''] * len(df_clean), index=df_clean.index, dtype=object)
+        mask = dt.notna()
+        result[mask] = dt[mask].dt.strftime('%d.%m.%Y')
+        df_clean['Tarih'] = result
+
         # NaN/NaT değerleri boş string yap
-        df_clean['Tarih'] = df_clean['Tarih'].replace(['nan', 'none', 'NaT', '<na>', 'nat', 'None', 'NAT'], '')
+        df_clean['Tarih'] = df_clean['Tarih'].replace(
+            ['nan', 'none', 'NaT', '<na>', 'nat', 'None', 'NAT', '<NA>'], ''
+        )
     else:
         df_clean['Tarih'] = ""
     if 'Tutar' not in df_clean.columns:
