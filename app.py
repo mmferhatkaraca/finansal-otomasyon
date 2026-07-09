@@ -202,6 +202,19 @@ def rerun_motor():
 # ==============================================================================
 # 4. HESAP LİSTESİ YARDIMCILARI
 # ==============================================================================
+# --- Türkçe alfabetik sıralama yardımcıları ---
+_TR_ALPHABET = "aAbBcCçÇdDeEfFgGğĞhHıIiİjJkKlLmMnNoOöÖpPrRsSşŞtTuUüÜvVyYzZ"
+_TR_RANK = {ch: i for i, ch in enumerate(_TR_ALPHABET)}
+
+def tr_sort_key(s):
+    """Türkçe alfabeye göre, büyük/küçük harf duyarsız sıralama anahtarı."""
+    return [_TR_RANK.get(ch, 1000 + ord(ch)) for ch in str(s)]
+
+def tr_sorted(iterable):
+    """Bir listeyi Türkçe alfabetik sıraya dizer (Ç, Ğ, İ, Ö, Ş, Ü doğru yerde)."""
+    return sorted(iterable, key=tr_sort_key)
+
+
 @st.cache_data(show_spinner=False)
 def get_sorted_account_list(df_hp):
     if df_hp is None or df_hp.empty or "Hesap Kodu" not in df_hp.columns or "Hesap Adı" not in df_hp.columns:
@@ -216,8 +229,15 @@ def get_sorted_account_list(df_hp):
     df_temp = df_temp[~df_temp["Hesap Kodu"].str.lower().isin(['nan', 'none', '<na>', 'nat', ''])]
     df_temp = df_temp[df_temp["Hesap Kodu"].str.contains(r'[0-9A-Za-z]', na=False)]
     def sort_key(c):
+        # Sayısal parçaları sayı olarak (100 > 20 doğru), metin parçalarını Türkçe alfabeye göre sırala
         parts = re.split(r'[\s\.\-_]+', str(c))
-        return ".".join([f"{int(p):010d}" if p.isdigit() else p.lower() for p in parts])
+        key_parts = []
+        for p in parts:
+            if p.isdigit():
+                key_parts.append(f"{int(p):010d}")
+            else:
+                key_parts.append("".join(f"{r:04d}" for r in tr_sort_key(p)))
+        return ".".join(key_parts)
     df_temp["_sort"] = df_temp["Hesap Kodu"].apply(sort_key)
     df_sorted = df_temp.sort_values("_sort").reset_index(drop=True)
     liste = [""] + (df_sorted["Hesap Kodu"] + " - " + df_sorted["Hesap Adı"]).tolist()
@@ -498,9 +518,9 @@ if menu == "📊 İşlem Merkezi":
                 h_opts_f = sorted([str(x) for x in df['Hareket Tipi'].unique() if str(x).strip()]) if 'Hareket Tipi' in df.columns else []
                 hareket_f = st.multiselect("🔄 Hareket", h_opts_f, default=[], placeholder="Tümü")
             f4, f5, f6, f7 = st.columns(4)
-            with f4: banka_f = st.multiselect("🏦 Banka", sorted([str(x) for x in df['Banka Adı'].unique() if str(x).strip()]) if 'Banka Adı' in df.columns else [], placeholder="Tümü")
-            with f5: fis_f = st.multiselect("📑 Fiş", sorted([str(x) for x in df['Fiş Türü'].unique() if str(x).strip()]) if 'Fiş Türü' in df.columns else [], placeholder="Tümü")
-            with f6: proje_f = st.multiselect("🎯 Proje", sorted([str(x) for x in df['Proje'].unique() if str(x).strip()]) if 'Proje' in df.columns else [], placeholder="Tümü")
+            with f4: banka_f = st.multiselect("🏦 Banka", tr_sorted([str(x) for x in df['Banka Adı'].unique() if str(x).strip()]) if 'Banka Adı' in df.columns else [], placeholder="Tümü")
+            with f5: fis_f = st.multiselect("📑 Fiş", tr_sorted([str(x) for x in df['Fiş Türü'].unique() if str(x).strip()]) if 'Fiş Türü' in df.columns else [], placeholder="Tümü")
+            with f6: proje_f = st.multiselect("🎯 Proje", tr_sorted([str(x) for x in df['Proje'].unique() if str(x).strip()]) if 'Proje' in df.columns else [], placeholder="Tümü")
             with f7:
                 mn_a = float(df['Tutar'].min()) if 'Tutar' in df.columns and not df['Tutar'].empty else 0.0
                 mx_a = float(df['Tutar'].max()) if 'Tutar' in df.columns and not df['Tutar'].empty else 1.0
@@ -560,7 +580,7 @@ if menu == "📊 İşlem Merkezi":
 elif menu == "🏦 Banka Eşleştirmeleri":
     st.markdown('<div class="main-header"><h1>🏦 Banka Eşleştirmeleri</h1></div>', unsafe_allow_html=True)
     eslesmis = [b.bank_name.strip() for b in st.session_state.bank_accounts]
-    yeni = sorted([str(b).strip() for b in (st.session_state.raw_df["Banka Adı"].dropna().unique().tolist() if st.session_state.raw_df is not None and "Banka Adı" in st.session_state.raw_df.columns else []) if str(b).strip() and str(b).strip() not in eslesmis]) if st.session_state.raw_df is not None else []
+    yeni = tr_sorted([str(b).strip() for b in (st.session_state.raw_df["Banka Adı"].dropna().unique().tolist() if st.session_state.raw_df is not None and "Banka Adı" in st.session_state.raw_df.columns else []) if str(b).strip() and str(b).strip() not in eslesmis]) if st.session_state.raw_df is not None else []
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("➕ Yeni Eşleştirme")
