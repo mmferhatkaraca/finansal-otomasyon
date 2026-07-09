@@ -260,20 +260,10 @@ def render_account_selector(label, key_prefix, default_code=""):
         t_code = st.text_input(f"{label} Kodu*", value=default_code, key=f"{key_prefix}_code")
         t_name = st.text_input(f"{label} Adı", value="", key=f"{key_prefix}_name")
         return t_code.strip(), t_name.strip()
-    # 🔎 Kendi arama kutusu: yazınca SADECE filtreler, hesap kodu sıralamasını KORUR.
-    # (st.selectbox'ın kendi araması sonuçları alaka sırasına göre dizdiği için ayrı kutu kullanıyoruz.)
-    arama = st.text_input(f"🔎 {label} Ara", value="", key=f"{key_prefix}_search",
-                          placeholder="Kod veya isim yazın (ör. kuveyt, 320)...")
-    if arama.strip():
-        q = arama.strip().lower()
-        # İlk eleman boş seçenek ("") olduğu için onu koru, gerisini filtrele — sıra bozulmaz.
-        filtrelenmis = [hesap_list[0]] + [x for x in hesap_list[1:] if q in x.lower()]
-    else:
-        filtrelenmis = hesap_list
-    if len(filtrelenmis) <= 1:
-        st.caption("⚠️ Aramaya uygun hesap bulunamadı.")
-    def_idx = filtrelenmis.index(next((x for x in filtrelenmis if x.split(" - ")[0].strip() == default_code), filtrelenmis[0])) if default_code and default_code in code_idx else 0
-    secilen = st.selectbox(f"{label}*", options=filtrelenmis, index=min(def_idx, len(filtrelenmis)-1), key=f"{key_prefix}_sel")
+    # Tek kutu: doğrudan selectbox içine yazıp filtrele. Liste hesap koduna göre sıralı gelir.
+    def_idx = code_idx.get(default_code, 0) if default_code else 0
+    secilen = st.selectbox(f"{label}*", options=hesap_list, index=min(def_idx, len(hesap_list)-1),
+                           key=f"{key_prefix}_sel", placeholder="Kod veya isim yazıp seçin...")
     t_code = secilen.split(" - ")[0].strip() if secilen else ""
     t_name = secilen.split(" - ", 1)[1].strip() if " - " in secilen else ""
     return t_code, t_name
