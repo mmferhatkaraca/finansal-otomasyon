@@ -605,13 +605,18 @@ if menu == "📊 İşlem Merkezi":
             st.download_button("📥 XLSX İndir", data=out.getvalue(), file_name=f"islenmis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
         
         st.caption("💡 Satıra tıklayarak hızlı kural ekleyebilirsiniz!")
-        # Performans: çok büyük veri setinde ekranda sadece ilk N satırı render et (indirme tüm veriyi kapsar).
-        _RENDER_LIMIT = 2000
-        if len(dd) > _RENDER_LIMIT:
-            st.info(f"⚡ Hız için ekranda ilk {_RENDER_LIMIT:,} satır gösteriliyor ({len(dd):,} satırın). Tümü '📥 XLSX İndir' ile alınır; filtreleyerek daraltabilirsiniz.")
-            dd_view = dd.head(_RENDER_LIMIT)
-        else:
-            dd_view = dd
+        # Performans: ekranda gösterilecek satır sayısını kullanıcı seçer (varsayılan 100).
+        # Az satır = daha hızlı render. Tüm veri her zaman '📥 XLSX İndir' ile alınır.
+        sc1, sc2 = st.columns([2, 8])
+        with sc1:
+            _limit_opts = [100, 250, 500, 1000, 2000, 5000]
+            render_limit = st.selectbox("📄 Gösterilecek satır", _limit_opts, index=0, key="render_limit_sel")
+        dd_view = dd.head(render_limit)
+        with sc2:
+            if len(dd) > render_limit:
+                st.caption(f"⚡ İlk **{render_limit:,}** satır gösteriliyor (toplam **{len(dd):,}**). Tümü için XLSX indirin veya filtreleyin.")
+            else:
+                st.caption(f"Tümü gösteriliyor: **{len(dd):,}** satır.")
         event = st.dataframe(dd_view, height=580, width="stretch", key=f"main_df_{st.session_state._df_key}", on_select="rerun", selection_mode="single-row",
             column_config={"Durum": st.column_config.TextColumn("Durum", width="small"), "Tutar": st.column_config.NumberColumn("Tutar (₺)", format="%.2f ₺"),
                 "Tarih": st.column_config.TextColumn("Tarih", width="small"), "Banka Adı": st.column_config.TextColumn("Banka", width="medium"),
