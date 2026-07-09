@@ -316,7 +316,8 @@ with st.sidebar:
                 st.session_state.current_company_id = sel_comp['id']
                 st.session_state.current_company_name = sel_comp['name']
                 st.session_state._df_key += 1
-                st.session_state._last_dialog_row = None
+                st.session_state._dismissed_row = None
+                st.session_state._active_dialog_row = None
                 load_company_data(sel_comp['id'])
                 st.session_state._last_company_id = sel_comp['id']
                 st.rerun()
@@ -435,8 +436,10 @@ with st.sidebar:
 # ==============================================================================
 # 6. HIZLI KURAL EKLEME DIALOG
 # ==============================================================================
-@st.dialog("⚡ Hızlı Kural Ekle", width="large")
 def hizli_kural_dialog(row_data):
+    # NOT: Eskiden @st.dialog (modal) idi. Modal açılış gecikmesini kaldırmak için
+    # artık tablonun altında ANINDA dolan bir panel olarak render ediliyor.
+    st.markdown("### ⚡ Hızlı Kural Ekle")
     def get_val(keys, default=""):
         for k in keys:
             if k in row_data.index:
@@ -492,9 +495,8 @@ def hizli_kural_dialog(row_data):
     btn1, btn2 = st.columns([1, 2])
     with btn1:
         if st.button("❌ İptal", width="stretch"):
-            # Sadece dialog form alanlarını temizle. Tabloyu remount ETME (_df_key sabit)
-            # → iptal anında arka planda ağır yenileme olmaz, dialog anında kapanır.
-            # NOT: _last_dialog_row'a dokunma → seçili satır guard'da kalır, dialog tekrar açılmaz.
+            # Paneli kapat: aktif satır pozisyonunu 'dismissed' işaretle. Tablo remount YOK.
+            st.session_state._dismissed_row = st.session_state.get("_active_dialog_row")
             for key in list(st.session_state.keys()):
                 if key.startswith("hizli_") or key.startswith("hk_"):
                     del st.session_state[key]
@@ -514,9 +516,9 @@ def hizli_kural_dialog(row_data):
                 st.session_state.rules.append(new_rule)
                 save_to_db()
                 add_log("Hızlı Kural Eklendi", f"{r_name} -> {t_code}", "SUCCESS")
-                # Dialog kapat + Motor çalıştır. Tabloyu remount ETME (_df_key sabit);
-                # motor sonucu mapped_df'i günceller, tablo yeni içerikle zaten çizilir.
-                # _last_dialog_row'a dokunma → seçili satır guard'da kalır, dialog tekrar açılmaz.
+                # Paneli kapat (bu satırı dismissed işaretle) + Motoru çalıştır. Tablo remount YOK;
+                # motor mapped_df'i günceller, tablo yeni içerikle çizilir.
+                st.session_state._dismissed_row = st.session_state.get("_active_dialog_row")
                 for key in list(st.session_state.keys()):
                     if key.startswith("hizli_") or key.startswith("hk_"):
                         del st.session_state[key]
@@ -627,15 +629,16 @@ if menu == "📊 İşlem Merkezi":
                 "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
                 "Muhasebe Hesap Kodu": st.column_config.TextColumn("Muh. Kodu", width="medium"), "Muhasebe Hesap Adı": st.column_config.TextColumn("Muh. Adı", width="large"),
                 "Eşleşen Kural ID": st.column_config.TextColumn("Kural", width="medium")})
-        # Guard: dialog'u sadece YENİ bir satır seçilince aç. Aynı seçim tekrar
-        # gelirse (dialog iptal/kaydet sonrası rerun) yeniden açma → tablo remount yok, hızlı.
+        # INLINE PANEL: satır seçilince tablonun ALTINDA anında açılır (modal yok = gecikme yok).
+        # İptal/Kaydet, o satırı '_dismissed_row' olarak işaretler → panel kapanır, tekrar açılmaz.
         if len(event.selection.rows) > 0:
             sel_row = event.selection.rows[0]
-            if st.session_state.get("_last_dialog_row") != sel_row:
-                st.session_state._last_dialog_row = sel_row
-                hizli_kural_dialog(dd.iloc[sel_row])
+            if st.session_state.get("_dismissed_row") != sel_row:
+                st.session_state._active_dialog_row = sel_row  # panelin kapanışta kullanacağı pozisyon
+                with st.container(border=True):
+                    hizli_kural_dialog(dd.iloc[sel_row])
         else:
-            st.session_state._last_dialog_row = None
+            st.session_state._dismissed_row = None
     else:
         st.info("👈 Sol menüden ekstre yükleyin. DB'de kayıtlı veri varsa otomatik gelir.")
 
