@@ -58,6 +58,32 @@ current_user = get_current_user()
 db = Database()
 
 # ==============================================================================
+# 2.5. MOTOR SONUÇ ÖNBELLEĞİ (içerik-hash) - aynı veri+kural+banka'da yeniden hesaplama yok
+# ==============================================================================
+def _motor_imza(raw_df, rules, banks):
+    """Girdilerin hafif bir içerik imzasını üretir."""
+    try:
+        if raw_df is None:
+            df_sig = "none"
+        else:
+            # Şekil + hızlı içerik hash'i (tüm satırları tek tek hash'lemekten hızlı ve yeterli)
+            df_sig = f"{raw_df.shape}_{int(pd.util.hash_pandas_object(raw_df, index=True).sum())}"
+    except Exception:
+        df_sig = f"{None if raw_df is None else raw_df.shape}"
+    r_sig = "|".join(f"{r.name}:{r.priority}:{r.is_active}:{r.target_account_code}:{sorted(r.criteria.items())}:{r.min_amount}:{r.max_amount}" for r in rules)
+    b_sig = "|".join(f"{b.bank_name}:{b.account_code}" for b in banks)
+    return f"{df_sig}##{hash(r_sig)}##{hash(b_sig)}"
+
+def cached_apply_rules(raw_df, rules, banks):
+    """apply_rules'u içerik imzasına göre önbellekler. İmza değişmedikçe motoru atlar."""
+    imza = _motor_imza(raw_df, rules, banks)
+    if st.session_state.get('_motor_imza') == imza and st.session_state.get('mapped_df') is not None:
+        return st.session_state.mapped_df, st.session_state.stats
+    mapped_df, stats = apply_rules(raw_df, rules, banks)
+    st.session_state._motor_imza = imza
+    return mapped_df, stats
+
+# ==============================================================================
 # 3. SESSION STATE + FİRMA YÖNETİMİ
 # ==============================================================================
 def load_company_data(cid):
@@ -65,7 +91,6 @@ def load_company_data(cid):
     if db.online:
         rules_data = db.get_rules(cid)
         st.session_state.rules = [Rule(**r) for r in rules_data] if rules_data else []
-        print(f"[LOAD] Firma {cid}: {len(st.session_state.rules)} kural yüklendi")
         
         banks_data = db.get_bank_accounts(cid)
         st.session_state.bank_accounts = [BankAccountDefinition(**b) for b in banks_data] if banks_data else []
@@ -83,18 +108,14 @@ def load_company_data(cid):
         if raw_data and raw_data.get("value"):
             try:
                 st.session_state.raw_df = pd.DataFrame(raw_data["value"])
-                print(f"[LOAD] Fiş listesi yüklendi: {len(st.session_state.raw_df)} satır")
             except Exception as e:
                 print(f"[LOAD] Fiş listesi DataFrame hatası: {e}")
-        else:
-            print(f"[LOAD] Fiş listesi DB'de yok")
         
         # Motor çalıştır
         if st.session_state.raw_df is not None:
-            mapped_df, stats = apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
+            mapped_df, stats = cached_apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
             st.session_state.mapped_df = mapped_df
             st.session_state.stats = stats
-            print(f"[LOAD] Motor çalıştı: {stats.matched_records}/{stats.total_records} eşleşti (%{stats.match_rate_percentage:.1f})")
         
         st.session_state.pop('hp_cache_key', None)
     else:
@@ -188,15 +209,10 @@ def rerun_motor():
             st.session_state.bank_accounts = [BankAccountDefinition(**b) for b in banks_data]
     
     raw_df = st.session_state.raw_df
-    rules_count = len(st.session_state.rules)
-    print(f"[MOTOR] raw_df: {'YOK (None)' if raw_df is None else f'{len(raw_df)} satır'}, Kurallar: {rules_count}")
     if raw_df is not None:
-        mapped_df, stats = apply_rules(raw_df, st.session_state.rules, st.session_state.bank_accounts)
+        mapped_df, stats = cached_apply_rules(raw_df, st.session_state.rules, st.session_state.bank_accounts)
         st.session_state.mapped_df = mapped_df
         st.session_state.stats = stats
-        print(f"[MOTOR] Sonuç: {stats.matched_records}/{stats.total_records} eşleşti (%{stats.match_rate_percentage:.1f})")
-    else:
-        print("[MOTOR] ⚠️ raw_df None! Fiş listesi yüklenmemiş.")
     st.rerun()
 
 # ==============================================================================
@@ -325,7 +341,7 @@ with st.sidebar:
     if st.button("🔄 Motoru Çalıştır", type="primary", width="stretch"):
         if st.session_state.raw_df is not None:
             with st.spinner("İşleniyor..."):
-                mapped_df, stats = apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
+                mapped_df, stats = cached_apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
                 st.session_state.mapped_df = mapped_df
                 st.session_state.stats = stats
             add_log("Motor Çalıştırıldı", f"{len(mapped_df)} satır", "INFO")
@@ -374,7 +390,7 @@ with st.sidebar:
                         df_for_json.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
                     
                     db.save_raw_data(df_for_json.to_dict(orient="records"), cid, current_user.get("username", "system"))
-                mapped_df, stats = apply_rules(df_new, st.session_state.rules, st.session_state.bank_accounts)
+                mapped_df, stats = cached_apply_rules(df_new, st.session_state.rules, st.session_state.bank_accounts)
                 st.session_state.mapped_df = mapped_df
                 st.session_state.stats = stats
                 add_log("Dosya Yüklendi", f"{uploaded_file.name} ({len(df_new)} satır)", "SUCCESS")
@@ -501,7 +517,7 @@ def hizli_kural_dialog(row_data):
                     if key.startswith("hizli_") or key.startswith("hk_"):
                         del st.session_state[key]
                 if st.session_state.raw_df is not None:
-                    mapped_df, stats = apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
+                    mapped_df, stats = cached_apply_rules(st.session_state.raw_df, st.session_state.rules, st.session_state.bank_accounts)
                     st.session_state.mapped_df = mapped_df
                     st.session_state.stats = stats
                 st.toast(f"✅ '{r_name}' eklendi!", icon="🎉")
@@ -589,7 +605,14 @@ if menu == "📊 İşlem Merkezi":
             st.download_button("📥 XLSX İndir", data=out.getvalue(), file_name=f"islenmis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
         
         st.caption("💡 Satıra tıklayarak hızlı kural ekleyebilirsiniz!")
-        event = st.dataframe(dd, height=580, width="stretch", key=f"main_df_{st.session_state._df_key}", on_select="rerun", selection_mode="single-row",
+        # Performans: çok büyük veri setinde ekranda sadece ilk N satırı render et (indirme tüm veriyi kapsar).
+        _RENDER_LIMIT = 2000
+        if len(dd) > _RENDER_LIMIT:
+            st.info(f"⚡ Hız için ekranda ilk {_RENDER_LIMIT:,} satır gösteriliyor ({len(dd):,} satırın). Tümü '📥 XLSX İndir' ile alınır; filtreleyerek daraltabilirsiniz.")
+            dd_view = dd.head(_RENDER_LIMIT)
+        else:
+            dd_view = dd
+        event = st.dataframe(dd_view, height=580, width="stretch", key=f"main_df_{st.session_state._df_key}", on_select="rerun", selection_mode="single-row",
             column_config={"Durum": st.column_config.TextColumn("Durum", width="small"), "Tutar": st.column_config.NumberColumn("Tutar (₺)", format="%.2f ₺"),
                 "Tarih": st.column_config.TextColumn("Tarih", width="small"), "Banka Adı": st.column_config.TextColumn("Banka", width="medium"),
                 "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
@@ -769,7 +792,16 @@ elif menu == "📈 Kural Analizi":
         else: st.info("Veri yükleyin.")
     with tab2:
         if st.session_state.raw_df is not None:
-            raw_std = standardize_dataframe(st.session_state.raw_df.copy())
+            # standardize sonucunu imzaya göre önbellekle (her rerun'da yeniden hesaplama)
+            _std_imza = f"{st.session_state.raw_df.shape}"
+            try:
+                _std_imza += f"_{int(pd.util.hash_pandas_object(st.session_state.raw_df, index=True).sum())}"
+            except Exception:
+                pass
+            if st.session_state.get('_raw_std_imza') != _std_imza or st.session_state.get('_raw_std') is None:
+                st.session_state._raw_std = standardize_dataframe(st.session_state.raw_df.copy())
+                st.session_state._raw_std_imza = _std_imza
+            raw_std = st.session_state._raw_std
             with st.form("test_form"):
                 tk1, tk2 = st.columns(2)
                 with tk1: t_cari = st.text_input("Cari"); t_banka = st.text_input("Banka"); t_acik = st.text_input("Açıklama")

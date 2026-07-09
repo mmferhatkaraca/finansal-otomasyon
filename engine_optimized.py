@@ -150,20 +150,6 @@ def apply_rules(df: pd.DataFrame, rules: List[Rule], bank_accounts: List[BankAcc
     df_proc = standardize_dataframe(df)
     total_rows = len(df_proc)
     
-    # DEBUG: İlk satırın kolonlarını ve değerlerini göster
-    if total_rows > 0:
-        print(f"[ENGINE] Kolonlar: {list(df_proc.columns)}")
-        print(f"[ENGINE] İlk satır Banka: '{df_proc['Banka Adı'].iloc[0]}'")
-        print(f"[ENGINE] İlk satır Cari: '{df_proc['Cari Tanım'].iloc[0]}'")
-        print(f"[ENGINE] İlk satır Fiş: '{df_proc['Fiş Türü'].iloc[0]}'")
-        print(f"[ENGINE] İlk satır Hareket: '{df_proc['Hareket Tipi'].iloc[0]}'")
-        print(f"[ENGINE] İlk satır Proje: '{df_proc['Proje'].iloc[0]}'")
-    
-    print(f"[ENGINE] {len(rules)} kural var")
-    for i, r in enumerate(rules[:3]):  # İlk 3 kuralı göster
-        print(f"[ENGINE] Kural {i+1}: {r.name}")
-        print(f"[ENGINE]   Kriterler: {r.criteria}")
-    
     if bank_accounts:
         bcm = {b.bank_name.strip().lower(): b.account_code for b in bank_accounts if b.bank_name}
         bnm = {b.bank_name.strip().lower(): b.account_name for b in bank_accounts if b.bank_name}
@@ -197,12 +183,6 @@ def apply_rules(df: pd.DataFrame, rules: List[Rule], bank_accounts: List[BankAcc
             if v and str(v).strip():
                 cd[k.lower()] = str(v).strip().casefold()  # casefold kullan
         compiled.append({'rule': r, 'criteria': cd, 'min_amt': r.min_amount, 'max_amt': r.max_amount})
-        print(f"[ENGINE] Compiled kriterler: {cd}")
-    
-    # İlk 5 satır için debug
-    debug_count = min(5, total_rows)
-    for i in range(debug_count):
-        print(f"[ENGINE] Satır {i}: Banka='{cb[i]}', Cari='{cc[i]}', Fiş='{cf[i]}', Hareket='{ch[i]}', Proje='{cp[i]}'")
     
     for i in range(total_rows):
         tv, av, cv, bv, fv, hv, pv, kv = ct[i], ca[i], cc[i], cb[i], cf[i], ch[i], cp[i], ck[i]
