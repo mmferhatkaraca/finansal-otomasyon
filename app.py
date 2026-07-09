@@ -326,8 +326,8 @@ with st.sidebar:
             st.warning("⚠️ Firma tanımlı değil.")
     st.markdown("---")
     
-    menu_options = ["📊 İşlem Merkezi", "🏦 Banka Eşleştirmeleri", "📝 Kural Yöneticisi", "📈 Kural Analizi", "🧾 Zirve Aktarım", "🗂️ Resmi Hesap Listesi", "📜 Sistem Logları"]
-    menu_icons = ["bar-chart-line-fill", "bank2", "sliders", "graph-up-arrow", "file-earmark-spreadsheet", "folder2-open", "journal-text"]
+    menu_options = ["📊 İşlem Merkezi", "🏦 Banka Eşleştirmeleri", "📝 Kural Yönetimi", "🧾 Zirve Aktarım", "🗂️ Resmi Hesap Listesi", "📜 Sistem Logları"]
+    menu_icons = ["bar-chart-line-fill", "bank2", "sliders", "file-earmark-spreadsheet", "folder2-open", "journal-text"]
     if is_admin():
         menu_options.append("👥 Yönetim")
         menu_icons.append("people-fill")
@@ -686,8 +686,8 @@ elif menu == "🏦 Banka Eşleştirmeleri":
                     db.client.table("bank_accounts").delete().eq("company_id", st.session_state.current_company_id).execute()
                 rerun_motor()
 
-elif menu == "📝 Kural Yöneticisi":
-    st.markdown('<div class="main-header"><h1>📝 Kural Yöneticisi</h1></div>', unsafe_allow_html=True)
+elif menu == "📝 Kural Yönetimi":
+    st.markdown('<div class="main-header"><h1>📝 Kural Yönetimi</h1><p>Kural ekleme, düzenleme, analiz ve test.</p></div>', unsafe_allow_html=True)
     
     @st.dialog("✏️ Kuralı Düzenle", width="large")
     def kural_duzenle(idx):
@@ -733,7 +733,8 @@ elif menu == "📝 Kural Yöneticisi":
                     st.toast(f"✅ '{e_name}' güncellendi!", icon="✏️")
                     rerun_motor()
     
-    tab_list, tab_add, tab_conflict = st.tabs(["📋 Mevcut Kurallar", "➕ Kural Ekle", "⚡ Çakışma"])
+    tab_list, tab_add, tab_conflict, tab_perf, tab_test, tab_oneri = st.tabs(
+        ["📋 Mevcut Kurallar", "➕ Kural Ekle", "⚡ Çakışma", "📊 Performans", "🧪 Test", "🤖 Öneri"])
     with tab_list:
         if st.session_state.rules:
             rule_data = []
@@ -806,19 +807,34 @@ elif menu == "📝 Kural Yöneticisi":
         else:
             st.success("🎉 Çakışma yok!")
 
-elif menu == "📈 Kural Analizi":
-    st.markdown('<div class="main-header"><h1>📈 Kural Analizi & Test</h1></div>', unsafe_allow_html=True)
-    tab1, tab2, tab3 = st.tabs(["📊 Performans", "🧪 Test", "🤖 Öneri"])
-    with tab1:
+    with tab_perf:
         if st.session_state.mapped_df is not None and st.session_state.rules:
             mapped = st.session_state.mapped_df
-            perf = [{"Kural": r.name, "Kod": r.target_account_code, "Eşleşen": len(mapped[mapped['Eşleşen Kural ID'].astype(str).str.strip() == r.name]),
-                "Hacim": f"{mapped[mapped['Eşleşen Kural ID'].astype(str).str.strip() == r.name]['Tutar'].sum():,.2f} ₺"} for r in st.session_state.rules]
-            st.dataframe(pd.DataFrame(perf), width="stretch")
-        else: st.info("Veri yükleyin.")
-    with tab2:
+            active_ids = mapped['Eşleşen Kural ID'].astype(str).str.strip()
+            perf = []
+            for r in st.session_state.rules:
+                kazanan = mapped[active_ids == r.name]
+                perf.append({
+                    "Kural": r.name,
+                    "Kod": r.target_account_code,
+                    "Eşleşen (Kazanan)": len(kazanan),
+                    "Hacim": f"{kazanan['Tutar'].sum():,.2f} ₺",
+                    "Durum": "🟢 Aktif" if r.is_active else "🔴 Pasif",
+                })
+            df_perf = pd.DataFrame(perf)
+            st.caption("ℹ️ 'Eşleşen (Kazanan)' = bu kuralın gerçekten uygulandığı satır sayısı. Bir satıra birden fazla kural uyarsa yalnızca en yüksek öncelikli (en küçük Öncelik sayısı) kural kazanır; çakışan diğer kurallar burada 0 görünebilir → Çakışma sekmesini kontrol edin.")
+            st.dataframe(df_perf, width="stretch", height=400)
+            toplam_eslesen = int(df_perf["Eşleşen (Kazanan)"].sum())
+            hic_eslesmeyen = int((df_perf["Eşleşen (Kazanan)"] == 0).sum())
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Toplam Kural", len(df_perf))
+            m2.metric("Eşleşen Satır (kazanan)", f"{toplam_eslesen:,}")
+            m3.metric("Hiç Kazanmayan Kural", hic_eslesmeyen, help="0 gösteren kurallar: ya hiç veriye uymuyor ya da çakışmada başka kural kazanıyor.")
+        else:
+            st.info("Veri ve kural yükleyin.")
+
+    with tab_test:
         if st.session_state.raw_df is not None:
-            # standardize sonucunu imzaya göre önbellekle (her rerun'da yeniden hesaplama)
             _std_imza = f"{st.session_state.raw_df.shape}"
             try:
                 _std_imza += f"_{int(pd.util.hash_pandas_object(st.session_state.raw_df, index=True).sum())}"
@@ -828,6 +844,7 @@ elif menu == "📈 Kural Analizi":
                 st.session_state._raw_std = standardize_dataframe(st.session_state.raw_df.copy())
                 st.session_state._raw_std_imza = _std_imza
             raw_std = st.session_state._raw_std
+            st.caption("🔎 Girdiğin kriterlerin kaç satıra uyduğunu test et (içinde geçen mantığı).")
             with st.form("test_form"):
                 tk1, tk2 = st.columns(2)
                 with tk1: t_cari = st.text_input("Cari"); t_banka = st.text_input("Banka"); t_acik = st.text_input("Açıklama")
@@ -843,8 +860,10 @@ elif menu == "📈 Kural Analizi":
                     sonuc = raw_std[mask]
                     st.metric("Eşleşen", f"{len(sonuc):,} / {len(raw_std):,}")
                     if len(sonuc) > 0: st.dataframe(sonuc.head(30), width="stretch")
-        else: st.info("Veri yükleyin.")
-    with tab3:
+        else:
+            st.info("Veri yükleyin.")
+
+    with tab_oneri:
         if st.session_state.mapped_df is not None:
             eslesmemis = st.session_state.mapped_df[st.session_state.mapped_df['Muhasebe Hesap Kodu'].astype(str).str.strip() == ""]
             if len(eslesmemis) > 0:
@@ -857,7 +876,8 @@ elif menu == "📈 Kural Analizi":
                 if oneriler: st.dataframe(pd.DataFrame(oneriler), width="stretch")
                 else: st.success("Belirgin desen yok.")
             else: st.success("🎉 Tümü eşleştirilmiş!")
-        else: st.info("Veri yükleyin.")
+        else:
+            st.info("Veri yükleyin.")
 
 elif menu == "🧾 Zirve Aktarım":
     st.markdown('<div class="main-header"><h1>🧾 Zirve Fiş Aktarımı</h1><p>Aylara bölünmüş Zirve muhasebe fiş formatı.</p></div>', unsafe_allow_html=True)
