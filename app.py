@@ -319,14 +319,26 @@ with st.sidebar:
                     # Tarihleri DD.MM.YYYY formatına çevir (Unix timestamp dahil)
                     df_for_json = df_new.copy()
                     if 'Tarih' in df_for_json.columns:
-                        sample = str(df_for_json['Tarih'].iloc[0]) if len(df_for_json) > 0 else ""
-                        
+                        _tser = df_for_json['Tarih'].astype(str).str.strip()
+                        sample = ""
+                        for _v in _tser:
+                            if _v and _v not in ['nan', 'none', 'NaT', '', 'None', '<NA>']:
+                                sample = _v
+                                break
+
                         # Unix timestamp (milisaniye) kontrolü
                         if sample.isdigit() and len(sample) > 10:
-                            dt = pd.to_datetime(df_for_json['Tarih'].astype(int), unit='ms', errors='coerce')
+                            dt = pd.to_datetime(pd.to_numeric(df_for_json['Tarih'], errors='coerce'), unit='ms', errors='coerce')
+                        # DD.MM.YYYY / DD/MM/YYYY → gün önce
+                        elif re.match(r'^\d{1,2}[./]\d{1,2}[./]\d{2,4}', sample):
+                            dt = pd.to_datetime(_tser, errors='coerce', dayfirst=True)
+                        # YYYY-MM-DD gibi ISO / yıl-önce → dayfirst KULLANMA (gün-ay ters olmasın)
+                        elif re.match(r'^\d{4}[-./]\d{1,2}[-./]\d{1,2}', sample):
+                            dt = pd.to_datetime(_tser, errors='coerce', dayfirst=False)
                         else:
-                            dt = pd.to_datetime(df_for_json['Tarih'], format='%d.%m.%Y', errors='coerce')
-                        
+                            dt = pd.to_datetime(_tser, errors='coerce', dayfirst=True)
+
+                        df_for_json['Tarih'] = df_for_json['Tarih'].astype(object)
                         mask = dt.notna()
                         df_for_json.loc[mask, 'Tarih'] = dt[mask].dt.strftime('%d.%m.%Y')
                     
