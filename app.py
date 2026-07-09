@@ -500,7 +500,8 @@ def hizli_kural_dialog(row_data):
             for key in list(st.session_state.keys()):
                 if key.startswith("hizli_") or key.startswith("hk_"):
                     del st.session_state[key]
-            st.rerun()
+            # Sadece fragment'i yenile → panel anında kapanır, tüm sayfa yeniden çizilmez (hızlı).
+            st.rerun(scope="fragment")
     with btn2:
         if st.button("💾 Kaydet ve Uygula", type="primary", width="stretch"):
             if r_name and t_code:
@@ -514,7 +515,7 @@ def hizli_kural_dialog(row_data):
                     target_account_code=t_code, target_account_name=t_name, min_amount=mn, max_amount=mx,
                     note="Hızlı Kural", created_by=current_user.get("username", ""))
                 st.session_state.rules.append(new_rule)
-                save_to_db()
+                save_rule_to_db(new_rule)  # tek-kayıt insert (tümünü silip yeniden yazmaktan hızlı)
                 add_log("Hızlı Kural Eklendi", f"{r_name} -> {t_code}", "SUCCESS")
                 # Paneli kapat (bu satırı dismissed işaretle) + Motoru çalıştır. Tablo remount YOK;
                 # motor mapped_df'i günceller, tablo yeni içerikle çizilir.
@@ -527,7 +528,8 @@ def hizli_kural_dialog(row_data):
                     st.session_state.mapped_df = mapped_df
                     st.session_state.stats = stats
                 st.toast(f"✅ '{r_name}' eklendi!", icon="🎉")
-                st.rerun()
+                # Tüm sayfayı yenile → KPI kartları ve tablo yeni motor sonucuyla güncellensin.
+                st.rerun(scope="app")
             else:
                 st.error("⚠️ Kural Adı ve Hedef Hesap Kodu zorunludur!")
 
@@ -556,89 +558,94 @@ if menu == "📊 İşlem Merkezi":
             <div class="kpi-card"><div class="kpi-card-title">💰 Hacim</div><div class="kpi-card-value" style="color:#3B82F6">{toplam_hacim:,.2f} ₺</div></div>
         </div>""", unsafe_allow_html=True)
         st.progress(match_rate / 100.0, text=f"🚀 **%{match_rate:.1f}** Tamamlandı")
-        
-        # FİLTRELEME
-        with st.expander("🔍 **Detaylı Filtreleme**", expanded=True):
-            f1, f2, f3 = st.columns([2, 3, 2])
-            with f1: durum_f = st.multiselect("📌 Durum", ["🟢 Hazır", "⚪ Bekliyor", "🟡 Çakışma"], default=[], placeholder="Tümü")
-            with f2: arama = st.text_input("🔎 Genel Arama", placeholder="Akbank, fatura, Mega...")
-            with f3:
-                h_opts_f = sorted([str(x) for x in df['Hareket Tipi'].unique() if str(x).strip()]) if 'Hareket Tipi' in df.columns else []
-                hareket_f = st.multiselect("🔄 Hareket", h_opts_f, default=[], placeholder="Tümü")
-            f4, f5, f6, f7 = st.columns(4)
-            with f4: banka_f = st.multiselect("🏦 Banka", tr_sorted([str(x) for x in df['Banka Adı'].unique() if str(x).strip()]) if 'Banka Adı' in df.columns else [], placeholder="Tümü")
-            with f5: fis_f = st.multiselect("📑 Fiş", tr_sorted([str(x) for x in df['Fiş Türü'].unique() if str(x).strip()]) if 'Fiş Türü' in df.columns else [], placeholder="Tümü")
-            with f6: proje_f = st.multiselect("🎯 Proje", tr_sorted([str(x) for x in df['Proje'].unique() if str(x).strip()]) if 'Proje' in df.columns else [], placeholder="Tümü")
-            with f7:
-                mn_a = float(df['Tutar'].min()) if 'Tutar' in df.columns and not df['Tutar'].empty else 0.0
-                mx_a = float(df['Tutar'].max()) if 'Tutar' in df.columns and not df['Tutar'].empty else 1.0
-                tutar_f = st.slider("💵 Tutar (₺)", mn_a, mx_a, (mn_a, mx_a), step=100.0) if mn_a < mx_a else (mn_a, mx_a)
-            ca1, ca2, ca3, ca4 = st.columns([2, 2, 3, 1])
-            with ca1: k_kolon = st.selectbox("🎯 Kolon", ["(Seçilmedi)", "Açıklama", "Cari Tanım", "Muhasebe Hesap Kodu"])
-            with ca2: k_op = st.selectbox("⚙️ Op", ["İçerir", "Başlar", "Biter", "Tam Eşleşir", "İçermez"])
-            with ca3: k_deger = st.text_input("✍️ Değer", placeholder="Aranacak kelime...")
-            with ca4:
-                st.write(""); st.write("")
-                if st.button("🔄 Sıfırla", width="stretch"): st.rerun()
-        
-        dd = df.copy()
-        if durum_f: dd = dd[dd['Durum'].isin(durum_f)]
-        if arama and arama.strip():
-            q = arama.strip().lower()
-            sc = [c for c in dd.columns if dd[c].dtype == object]
-            if sc:
-                comb = dd[sc[0]].astype(str)
-                for c in sc[1:]: comb = comb + "|" + dd[c].astype(str)
-                dd = dd[comb.str.lower().str.contains(q, na=False)]
-        if hareket_f: dd = dd[dd['Hareket Tipi'].astype(str).isin(hareket_f)]
-        if banka_f: dd = dd[dd['Banka Adı'].astype(str).isin(banka_f)]
-        if fis_f: dd = dd[dd['Fiş Türü'].astype(str).isin(fis_f)]
-        if proje_f: dd = dd[dd['Proje'].astype(str).isin(proje_f)]
-        if tutar_f and len(tutar_f) == 2: dd = dd[(dd['Tutar'] >= tutar_f[0]) & (dd['Tutar'] <= tutar_f[1])]
-        if k_kolon != "(Seçilmedi)" and k_deger and k_deger.strip():
-            cs = dd[k_kolon].astype(str); v = k_deger.strip()
-            if k_op == "İçerir": dd = dd[cs.str.contains(v, case=False, na=False)]
-            elif k_op == "Başlar": dd = dd[cs.str.lower().str.startswith(v.lower(), na=False)]
-            elif k_op == "Biter": dd = dd[cs.str.lower().str.endswith(v.lower(), na=False)]
-            elif k_op == "Tam Eşleşir": dd = dd[cs.str.lower() == v.lower()]
-            elif k_op == "İçermez": dd = dd[~cs.str.contains(v, case=False, na=False)]
-        
-        b1, b2 = st.columns([7, 3])
-        with b1: st.markdown(f"**⚡ Gösterilen:** `{len(dd):,}` / `{len(df):,}`")
-        with b2:
-            out = BytesIO()
-            dd.drop(columns=[c for c in ["Durum","_conflict_count"] if c in dd.columns], errors="ignore").to_excel(out, index=False, engine="openpyxl")
-            st.download_button("📥 XLSX İndir", data=out.getvalue(), file_name=f"islenmis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
-        
-        st.caption("💡 Satıra tıklayarak hızlı kural ekleyebilirsiniz!")
-        # Performans: ekranda gösterilecek satır sayısını kullanıcı seçer (varsayılan 100).
-        # Az satır = daha hızlı render. Tüm veri her zaman '📥 XLSX İndir' ile alınır.
-        sc1, sc2 = st.columns([2, 8])
-        with sc1:
-            _limit_opts = [100, 250, 500, 1000, 2000, 5000]
-            render_limit = st.selectbox("📄 Gösterilecek satır", _limit_opts, index=0, key="render_limit_sel")
-        dd_view = dd.head(render_limit)
-        with sc2:
-            if len(dd) > render_limit:
-                st.caption(f"⚡ İlk **{render_limit:,}** satır gösteriliyor (toplam **{len(dd):,}**). Tümü için XLSX indirin veya filtreleyin.")
+
+        # ⚡ FRAGMENT: Filtreleme + tablo + hızlı kural paneli izole çalışır.
+        # Satır seçimi ve filtreler yalnızca BU bölgeyi yeniden çalıştırır; başlık/KPI kartları
+        # yeniden çizilmez ve tarayıcıya gönderilen veri küçülür → belirgin hız artışı.
+        @st.fragment
+        def islem_merkezi_tablo(df):
+            # FİLTRELEME
+            with st.expander("🔍 **Detaylı Filtreleme**", expanded=True):
+                f1, f2, f3 = st.columns([2, 3, 2])
+                with f1: durum_f = st.multiselect("📌 Durum", ["🟢 Hazır", "⚪ Bekliyor", "🟡 Çakışma"], default=[], placeholder="Tümü")
+                with f2: arama = st.text_input("🔎 Genel Arama", placeholder="Akbank, fatura, Mega...")
+                with f3:
+                    h_opts_f = sorted([str(x) for x in df['Hareket Tipi'].unique() if str(x).strip()]) if 'Hareket Tipi' in df.columns else []
+                    hareket_f = st.multiselect("🔄 Hareket", h_opts_f, default=[], placeholder="Tümü")
+                f4, f5, f6, f7 = st.columns(4)
+                with f4: banka_f = st.multiselect("🏦 Banka", tr_sorted([str(x) for x in df['Banka Adı'].unique() if str(x).strip()]) if 'Banka Adı' in df.columns else [], placeholder="Tümü")
+                with f5: fis_f = st.multiselect("📑 Fiş", tr_sorted([str(x) for x in df['Fiş Türü'].unique() if str(x).strip()]) if 'Fiş Türü' in df.columns else [], placeholder="Tümü")
+                with f6: proje_f = st.multiselect("🎯 Proje", tr_sorted([str(x) for x in df['Proje'].unique() if str(x).strip()]) if 'Proje' in df.columns else [], placeholder="Tümü")
+                with f7:
+                    mn_a = float(df['Tutar'].min()) if 'Tutar' in df.columns and not df['Tutar'].empty else 0.0
+                    mx_a = float(df['Tutar'].max()) if 'Tutar' in df.columns and not df['Tutar'].empty else 1.0
+                    tutar_f = st.slider("💵 Tutar (₺)", mn_a, mx_a, (mn_a, mx_a), step=100.0) if mn_a < mx_a else (mn_a, mx_a)
+                ca1, ca2, ca3, ca4 = st.columns([2, 2, 3, 1])
+                with ca1: k_kolon = st.selectbox("🎯 Kolon", ["(Seçilmedi)", "Açıklama", "Cari Tanım", "Muhasebe Hesap Kodu"])
+                with ca2: k_op = st.selectbox("⚙️ Op", ["İçerir", "Başlar", "Biter", "Tam Eşleşir", "İçermez"])
+                with ca3: k_deger = st.text_input("✍️ Değer", placeholder="Aranacak kelime...")
+                with ca4:
+                    st.write(""); st.write("")
+                    if st.button("🔄 Sıfırla", width="stretch"): st.rerun()
+
+            dd = df.copy()
+            if durum_f: dd = dd[dd['Durum'].isin(durum_f)]
+            if arama and arama.strip():
+                q = arama.strip().lower()
+                sc = [c for c in dd.columns if dd[c].dtype == object]
+                if sc:
+                    comb = dd[sc[0]].astype(str)
+                    for c in sc[1:]: comb = comb + "|" + dd[c].astype(str)
+                    dd = dd[comb.str.lower().str.contains(q, na=False)]
+            if hareket_f: dd = dd[dd['Hareket Tipi'].astype(str).isin(hareket_f)]
+            if banka_f: dd = dd[dd['Banka Adı'].astype(str).isin(banka_f)]
+            if fis_f: dd = dd[dd['Fiş Türü'].astype(str).isin(fis_f)]
+            if proje_f: dd = dd[dd['Proje'].astype(str).isin(proje_f)]
+            if tutar_f and len(tutar_f) == 2: dd = dd[(dd['Tutar'] >= tutar_f[0]) & (dd['Tutar'] <= tutar_f[1])]
+            if k_kolon != "(Seçilmedi)" and k_deger and k_deger.strip():
+                cs = dd[k_kolon].astype(str); v = k_deger.strip()
+                if k_op == "İçerir": dd = dd[cs.str.contains(v, case=False, na=False)]
+                elif k_op == "Başlar": dd = dd[cs.str.lower().str.startswith(v.lower(), na=False)]
+                elif k_op == "Biter": dd = dd[cs.str.lower().str.endswith(v.lower(), na=False)]
+                elif k_op == "Tam Eşleşir": dd = dd[cs.str.lower() == v.lower()]
+                elif k_op == "İçermez": dd = dd[~cs.str.contains(v, case=False, na=False)]
+
+            b1, b2 = st.columns([7, 3])
+            with b1: st.markdown(f"**⚡ Gösterilen:** `{len(dd):,}` / `{len(df):,}`")
+            with b2:
+                out = BytesIO()
+                dd.drop(columns=[c for c in ["Durum","_conflict_count"] if c in dd.columns], errors="ignore").to_excel(out, index=False, engine="openpyxl")
+                st.download_button("📥 XLSX İndir", data=out.getvalue(), file_name=f"islenmis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
+
+            st.caption("💡 Satıra tıklayarak hızlı kural ekleyebilirsiniz!")
+            # Performans: ekranda gösterilecek satır sayısını kullanıcı seçer (varsayılan 100).
+            sc1, sc2 = st.columns([2, 8])
+            with sc1:
+                _limit_opts = [100, 250, 500, 1000, 2000, 5000]
+                render_limit = st.selectbox("📄 Gösterilecek satır", _limit_opts, index=0, key="render_limit_sel")
+            dd_view = dd.head(render_limit)
+            with sc2:
+                if len(dd) > render_limit:
+                    st.caption(f"⚡ İlk **{render_limit:,}** satır gösteriliyor (toplam **{len(dd):,}**). Tümü için XLSX indirin veya filtreleyin.")
+                else:
+                    st.caption(f"Tümü gösteriliyor: **{len(dd):,}** satır.")
+            event = st.dataframe(dd_view, height=580, width="stretch", key=f"main_df_{st.session_state._df_key}", on_select="rerun", selection_mode="single-row",
+                column_config={"Durum": st.column_config.TextColumn("Durum", width="small"), "Tutar": st.column_config.NumberColumn("Tutar (₺)", format="%.2f ₺"),
+                    "Tarih": st.column_config.TextColumn("Tarih", width="small"), "Banka Adı": st.column_config.TextColumn("Banka", width="medium"),
+                    "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
+                    "Muhasebe Hesap Kodu": st.column_config.TextColumn("Muh. Kodu", width="medium"), "Muhasebe Hesap Adı": st.column_config.TextColumn("Muh. Adı", width="large"),
+                    "Eşleşen Kural ID": st.column_config.TextColumn("Kural", width="medium")})
+            # INLINE PANEL: satır seçilince tablonun ALTINDA anında açılır (modal yok = gecikme yok).
+            if len(event.selection.rows) > 0:
+                sel_row = event.selection.rows[0]
+                if st.session_state.get("_dismissed_row") != sel_row:
+                    st.session_state._active_dialog_row = sel_row
+                    with st.container(border=True):
+                        hizli_kural_dialog(dd.iloc[sel_row])
             else:
-                st.caption(f"Tümü gösteriliyor: **{len(dd):,}** satır.")
-        event = st.dataframe(dd_view, height=580, width="stretch", key=f"main_df_{st.session_state._df_key}", on_select="rerun", selection_mode="single-row",
-            column_config={"Durum": st.column_config.TextColumn("Durum", width="small"), "Tutar": st.column_config.NumberColumn("Tutar (₺)", format="%.2f ₺"),
-                "Tarih": st.column_config.TextColumn("Tarih", width="small"), "Banka Adı": st.column_config.TextColumn("Banka", width="medium"),
-                "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
-                "Muhasebe Hesap Kodu": st.column_config.TextColumn("Muh. Kodu", width="medium"), "Muhasebe Hesap Adı": st.column_config.TextColumn("Muh. Adı", width="large"),
-                "Eşleşen Kural ID": st.column_config.TextColumn("Kural", width="medium")})
-        # INLINE PANEL: satır seçilince tablonun ALTINDA anında açılır (modal yok = gecikme yok).
-        # İptal/Kaydet, o satırı '_dismissed_row' olarak işaretler → panel kapanır, tekrar açılmaz.
-        if len(event.selection.rows) > 0:
-            sel_row = event.selection.rows[0]
-            if st.session_state.get("_dismissed_row") != sel_row:
-                st.session_state._active_dialog_row = sel_row  # panelin kapanışta kullanacağı pozisyon
-                with st.container(border=True):
-                    hizli_kural_dialog(dd.iloc[sel_row])
-        else:
-            st.session_state._dismissed_row = None
+                st.session_state._dismissed_row = None
+
+        islem_merkezi_tablo(df)
     else:
         st.info("👈 Sol menüden ekstre yükleyin. DB'de kayıtlı veri varsa otomatik gelir.")
 
