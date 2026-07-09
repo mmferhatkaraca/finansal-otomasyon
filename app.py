@@ -436,8 +436,9 @@ with st.sidebar:
 # ==============================================================================
 # 6. HIZLI KURAL EKLEME DIALOG
 # ==============================================================================
+@st.dialog("⚡ Hızlı Kural Ekle", width="large")
 def hizli_kural_dialog(row_data):
-    # Kompakt inline panel: modal yok, tablonun altında anında açılır.
+    # Açılır modal pencere + kompakt düzen.
     def get_val(keys, default=""):
         for k in keys:
             if k in row_data.index:
@@ -456,10 +457,9 @@ def hizli_kural_dialog(row_data):
     def_tutar = get_val(['Tutar'], "0")
     def_tarih = get_val(['Tarih'])
 
-    # Başlık + seçili satır özeti (tek kompakt satır)
+    # Seçili satır özeti (tek kompakt şerit)
     st.markdown(
-        f"""<div style="font-weight:700;font-size:1rem;margin-bottom:6px;">⚡ Hızlı Kural Ekle</div>
-        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:0.8rem;line-height:1.5;">
+        f"""<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:0.8rem;line-height:1.5;">
             📅 {def_tarih or '-'} &nbsp;·&nbsp; 🏦 <b style="color:#2563EB">{def_banka or '-'}</b> &nbsp;·&nbsp; 🔄 {def_hareket or '-'} &nbsp;·&nbsp; 💰 <b style="color:#059669">{def_tutar} ₺</b><br>
             👤 {def_cari or '-'} &nbsp;·&nbsp; <i>{(def_aciklama[:60] + '…') if len(def_aciklama) > 60 else (def_aciklama or '-')}</i>
         </div>""",
@@ -496,13 +496,12 @@ def hizli_kural_dialog(row_data):
     btn1, btn2 = st.columns([1, 2])
     with btn1:
         if st.button("❌ İptal", width="stretch"):
-            # Paneli kapat: aktif satır pozisyonunu 'dismissed' işaretle. Tablo remount YOK.
+            # Modal'ı kapat: aktif satırı 'dismissed' işaretle (aynı satır tekrar açılmasın).
             st.session_state._dismissed_row = st.session_state.get("_active_dialog_row")
             for key in list(st.session_state.keys()):
                 if key.startswith("hizli_") or key.startswith("hk_"):
                     del st.session_state[key]
-            # Sadece fragment'i yenile → panel anında kapanır, tüm sayfa yeniden çizilmez (hızlı).
-            st.rerun(scope="fragment")
+            st.rerun()
     with btn2:
         if st.button("💾 Kaydet ve Uygula", type="primary", width="stretch"):
             if r_name and t_code:
@@ -529,7 +528,7 @@ def hizli_kural_dialog(row_data):
                     st.session_state.mapped_df = mapped_df
                     st.session_state.stats = stats
                 st.toast(f"✅ '{r_name}' eklendi!", icon="🎉")
-                # Tüm sayfayı yenile → KPI kartları ve tablo yeni motor sonucuyla güncellensin.
+                # Tüm sayfayı yenile → KPI kartları + tablo yeni motor sonucuyla güncellensin.
                 st.rerun(scope="app")
             else:
                 st.error("⚠️ Kural Adı ve Hedef Hesap Kodu zorunludur!")
@@ -636,13 +635,13 @@ if menu == "📊 İşlem Merkezi":
                     "Cari Tanım": st.column_config.TextColumn("Cari", width="large"), "Açıklama": st.column_config.TextColumn("Açıklama", width="large"),
                     "Muhasebe Hesap Kodu": st.column_config.TextColumn("Muh. Kodu", width="medium"), "Muhasebe Hesap Adı": st.column_config.TextColumn("Muh. Adı", width="large"),
                     "Eşleşen Kural ID": st.column_config.TextColumn("Kural", width="medium")})
-            # INLINE PANEL: satır seçilince tablonun ALTINDA anında açılır (modal yok = gecikme yok).
+            # MODAL: satır seçilince açılır pencere olarak açılır.
+            # Guard: aynı satır iptal/kaydet sonrası tekrar açılmasın.
             if len(event.selection.rows) > 0:
                 sel_row = event.selection.rows[0]
                 if st.session_state.get("_dismissed_row") != sel_row:
                     st.session_state._active_dialog_row = sel_row
-                    with st.container(border=True):
-                        hizli_kural_dialog(dd.iloc[sel_row])
+                    hizli_kural_dialog(dd.iloc[sel_row])
             else:
                 st.session_state._dismissed_row = None
 
