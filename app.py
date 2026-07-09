@@ -769,6 +769,7 @@ elif menu == "🧾 Zirve Aktarım":
             df_h['_dt'] = pd.to_datetime(df_h['Tarih'], dayfirst=True, errors='coerce')
             df_h = df_h.sort_values('_dt', ascending=True, na_position='last').reset_index(drop=True)
             df_h['_ay'] = df_h['_dt'].dt.month.fillna(-1).astype(int)
+            df_h['_yil'] = df_h['_dt'].dt.year.fillna(0).astype(int)
             
             aylar = sorted(df_h['_ay'].unique())
             ay_ad = {1:"Ocak",2:"Şubat",3:"Mart",4:"Nisan",5:"Mayıs",6:"Haziran",7:"Temmuz",8:"Ağustos",9:"Eylül",10:"Ekim",11:"Kasım",12:"Aralık",-1:"Tarihsiz"}
@@ -787,25 +788,104 @@ elif menu == "🧾 Zirve Aktarım":
             if len(df_h) == 0:
                 st.warning("Seçilen aylarda satır yok.")
             else:
+                # =====================================================================
+                # DENGE & VERİ KALİTESİ KONTROLÜ - #6
+                # =====================================================================
+                st.subheader("⚖️ Denge ve Veri Kontrolü")
+                # Banka hareketi özeti (bilgi amaçlı; giren=çıkan olmak zorunda DEĞİL)
+                toplam_borc = float(df_h['Borç'].sum())
+                toplam_alacak = float(df_h['Alacak'].sum())
+
+                # Zirve çift-kayıt mantığı: her işlem hem borç hem alacak tarafına yazılır.
+                # Nihai fişte toplam Borçlu == toplam Alacaklı olmalıdır (asıl muhasebe dengesi).
+                nihai_borclu = toplam_borc + toplam_alacak
+                nihai_alacakli = toplam_alacak + toplam_borc
+                fis_dengesi = round(nihai_borclu - nihai_alacakli, 2)
+
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric("Banka Girişi (Borç)", f"{toplam_borc:,.2f} ₺")
+                mc2.metric("Banka Çıkışı (Alacak)", f"{toplam_alacak:,.2f} ₺")
+                mc3.metric("Fiş Dengesi (B=A?)", "✅ Dengeli" if abs(fis_dengesi) < 0.01 else f"⚠️ {fis_dengesi:,.2f}")
+
+                # Veri kalitesi denetimleri (asıl önemli olanlar)
+                tarihsiz_sayi = int((df_h['_ay'] == -1).sum())
+                sifir_sayi = int(((df_h['Borç'] == 0) & (df_h['Alacak'] == 0)).sum())
+                bankasiz_sayi = int((df_h['Banka Hesap Kodu'].astype(str).str.strip() == "").sum()) if 'Banka Hesap Kodu' in df_h.columns else 0
+                cift_yon = int(((df_h['Borç'] != 0) & (df_h['Alacak'] != 0)).sum())
+
+                sorunlar = []
+                if tarihsiz_sayi > 0:
+                    sorunlar.append(f"🗓️ **{tarihsiz_sayi}** satırın tarihi okunamadı ('Tarihsiz' grubuna düştü).")
+                if sifir_sayi > 0:
+                    sorunlar.append(f"0️⃣ **{sifir_sayi}** satırın hem borç hem alacak tutarı sıfır.")
+                if bankasiz_sayi > 0:
+                    sorunlar.append(f"🏦 **{bankasiz_sayi}** satırda Banka Hesap Kodu boş (çift kaydın bir tarafı eksik olur).")
+                if cift_yon > 0:
+                    sorunlar.append(f"↔️ **{cift_yon}** satırda hem borç hem alacak dolu (yön belirsiz).")
+
+                if abs(fis_dengesi) < 0.01 and not sorunlar:
+                    st.success("✅ Fiş dengeli ve veri temiz. Aktarıma hazır.")
+                elif sorunlar:
+                    st.warning("⚠️ Aktarım öncesi kontrol edilmesi önerilen noktalar:")
+                    for m in sorunlar:
+                        st.markdown(f"- {m}")
+
+                st.divider()
                 st.success(f"✅ {len(df_h)} satır aktarıma hazır.")
-                prefix = st.text_input("Fiş No Öneki", value="BNK")
+
+                # =====================================================================
+                # AYARLAR: Fiş No öneki + Format seçici - #7, #8
+                # =====================================================================
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    prefix = st.text_input("Fiş No Öneki", value="BNK", help="Fiş numaraları: ÖNEK + YIL(4) + AY(2) + sıra(9) → örn. BNK202604000000001")
+                with col_b:
+                    export_format = st.selectbox("📄 Çıktı Formatı", ["Excel (.xlsx)", "CSV (.csv)", "Zirve TXT (.txt)"], help="Zirve sürümünüz Excel kabul etmiyorsa CSV veya TXT deneyin.")
+
                 if st.button("🧾 Oluştur ve İndir", type="primary", width="stretch"):
                     buf = BytesIO(); sayac = {}
                     aylar_to_export = sorted(df_h['_ay'].unique())
+                    # Benzersizlik denetimi için üretilen tüm fiş noları topla
+                    uretilen_fno = set()
+                    toplam_satir = 0
                     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                         for ay in aylar_to_export:
-                            if ay not in sayac: sayac[ay] = 0
                             rows = []
                             for _, row in df_h[df_h['_ay'] == ay].iterrows():
-                                sayac[ay] += 1; fno = f"{prefix}{ay:02d}{sayac[ay]:04d}"
+                                # Fiş no: ÖNEK + YIL(4 hane) + AY(2 hane) + sıra(9 hane) → örn. BNK202604000000001
+                                yil = int(row.get('_yil', 0))
+                                yil4 = f"{yil:04d}" if yil > 0 else "0000"
+                                anahtar = (yil4, ay)
+                                sayac[anahtar] = sayac.get(anahtar, 0) + 1
+                                fno = f"{prefix}{yil4}{ay:02d}{sayac[anahtar]:09d}"
+                                uretilen_fno.add(fno)
                                 rows.append({"Hesap Kodu": str(row.get("Banka Hesap Kodu","")), "Evrak Tarihi": str(row.get("Tarih","")), "Evrak No": fno, "B.T.": 8, "Vergi/TC No": "", "Açıklama": str(row.get("Açıklama","")), "Para Birimi": "", "Döviz Tutarı": "", "Borçlu": float(row.get("Borç",0)), "Alacaklı": float(row.get("Alacak",0)), "Belge Türü Açıklaması (B.Türü 8 İse)": "Banka Aktarım", "Ödeme Şekli": ""})
                                 rows.append({"Hesap Kodu": str(row.get("Muhasebe Hesap Kodu","")), "Evrak Tarihi": str(row.get("Tarih","")), "Evrak No": fno, "B.T.": 8, "Vergi/TC No": "", "Açıklama": str(row.get("Açıklama","")), "Para Birimi": "", "Döviz Tutarı": "", "Borçlu": float(row.get("Alacak",0)), "Alacaklı": float(row.get("Borç",0)), "Belge Türü Açıklaması (B.Türü 8 İse)": "Banka Aktarım", "Ödeme Şekli": ""})
                             if rows:
-                                eb = BytesIO(); pd.DataFrame(rows).to_excel(eb, index=False)
-                                zf.writestr(f"{ay:02d}_{ay_ad.get(ay,'')}_Aktarim.xlsx", eb.getvalue())
+                                toplam_satir += len(rows)
+                                df_out = pd.DataFrame(rows)
+                                dosya_kok = f"{ay:02d}_{ay_ad.get(ay,'')}_Aktarim"
+                                if export_format.startswith("Excel"):
+                                    eb = BytesIO(); df_out.to_excel(eb, index=False)
+                                    zf.writestr(f"{dosya_kok}.xlsx", eb.getvalue())
+                                elif export_format.startswith("CSV"):
+                                    # Türkçe/Zirve uyumu: ; ayraç, UTF-8 BOM, virgül ondalık
+                                    csv_str = df_out.to_csv(index=False, sep=';', decimal=',')
+                                    zf.writestr(f"{dosya_kok}.csv", ("\ufeff" + csv_str).encode("utf-8"))
+                                else:  # Zirve TXT — sekme ayraçlı, başlıksız (klasik içe aktarım formatı)
+                                    txt_str = df_out.to_csv(index=False, header=False, sep='\t', decimal=',')
+                                    zf.writestr(f"{dosya_kok}.txt", txt_str.encode("utf-8"))
                     buf.seek(0)
-                    st.success(f"✅ {len(aylar_to_export)} ay oluşturuldu!")
-                    st.download_button("📥 ZIP İndir", data=buf.getvalue(), file_name=f"Zirve_{datetime.now().strftime('%Y%m%d')}.zip", mime="application/zip", type="primary", width="stretch")
+
+                    # Benzersizlik doğrulaması (aynı fiş no birden fazla anahtara denk gelmesin)
+                    if len(uretilen_fno) == sum(sayac.values()):
+                        st.success(f"✅ {len(aylar_to_export)} ay oluşturuldu • {toplam_satir} kayıt • {len(uretilen_fno)} benzersiz fiş no.")
+                    else:
+                        st.error("⚠️ Fiş no çakışması tespit edildi! Öneki değiştirip tekrar deneyin.")
+                    add_log("Zirve Aktarımı", f"{len(aylar_to_export)} ay, {toplam_satir} kayıt, format={export_format}", "SUCCESS")
+
+                    ext_map = {"Excel (.xlsx)": "xlsx", "CSV (.csv)": "csv", "Zirve TXT (.txt)": "txt"}
+                    st.download_button("📥 ZIP İndir", data=buf.getvalue(), file_name=f"Zirve_{ext_map[export_format]}_{datetime.now().strftime('%Y%m%d')}.zip", mime="application/zip", type="primary", width="stretch")
     else:
         st.info("Veri yükleyin.")
 
